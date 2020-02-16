@@ -8,6 +8,7 @@ from scipy.spatial import distance
 from skimage.filters import threshold_yen
 from skimage.measure import label, regionprops
 from skimage.morphology import dilation, square
+from scipy import stats
 import matplotlib.pyplot as plt
 from collections import defaultdict
 
@@ -116,12 +117,12 @@ class DetectionThread(QThread):
     #     # croped = (frame[:, :, 0] / 50).astype('uint8')
     #     return croped
     #
-    def cell_detect(self, frame_buffer):
-        frame_absdiff = np.abs(np.diff(frame_buffer, axis=0))
-        frame_sum = np.sum(frame_absdiff, axis=0)
-        cellLocs = self.movement_cell_locations(frame_sum)
-        # plt.imshow(frame_sum)
-        # plt.show()
+    def cell_detect(self, window):
+        sumframe = np.sum(window, axis=0)
+        sumframe = (sumframe / 50).astype('uint8')
+        cellLocs = self.movement_cell_locations(sumframe)
+        plt.imshow(sumframe)
+        plt.show()
         if len(cellLocs) > 10:
             cellLocs = []
         return cellLocs
@@ -147,8 +148,8 @@ class DetectionThread(QThread):
             frame_id += 1
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             # resize = cv2.resize(gray, target_size).astype("int16")
-            resize = gray
-            diff_frames[frame_id - 1] = np.abs(resize.astype("int16") - prev_frame)
+            resize = gray.astype("int16")
+            diff_frames[frame_id - 1] = np.abs(resize - prev_frame)
 
             prev_frame = resize
 
@@ -162,14 +163,26 @@ class DetectionThread(QThread):
         log = []
         if len(gaps) != 0:
             for gap in gaps:
-                self.cap.set(cv2.CAP_PROP_POS_FRAMES, gap[0])
-                _, frame = self.cap.read()
-                area = self.find_count_area(frame)
-                cellLocs = self.cell_detect(diff_frames[gap[0]:gap[1]])
+                lenght = gap[1]-gap[0]
+                n_vote = 5
+                step_size = int(lenght/(n_vote-1))
+                window_size = 50
+                sum_size = window_size-1
+                m_cell_count = []
+                for last in range(gap[0]+sum_size,gap[1],step_size):
+                    self.cap.set(cv2.CAP_PROP_POS_FRAMES, last)
+                    _, frame = self.cap.read()
+                    area = self.find_count_area(frame)
+                    # window = diff_frames[last-sum_size:last]
+                    # sumframe = np.sum(window, axis=1)
+                    # sumframe = (sumframe/window_size).astype('uint8')
+                    cellLocs = self.cell_detect(diff_frames[last-sum_size:last])
+                    m_cell_count.append(len(cellLocs))
+                    for i in range(last-sum_size, last + 1):
+                        o = {'area': area, 'cell_bndbox': cellLocs}
+                        map[i] = o
+                print(m_cell_count)
                 log.append({'min_time': gap[0], 'max_time': gap[1], 'cells_count': len(cellLocs)})
-                for i in range(gap[0], gap[1] + 1):
-                    o = {'area': area, 'cell_bndbox': cellLocs}
-                    map[i] = o
                 # for cell in cellLocs:
                 #     top, left, bottom, right = cell.bbox
                 #     output = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
