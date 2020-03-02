@@ -3,6 +3,7 @@ from PyQt5.QtCore import QThread
 from PyQt5 import QtCore
 from PyQt5.QtWidgets import QApplication
 import numpy as np
+from keras_retinanet import models
 from scipy.ndimage import binary_closing
 from scipy.spatial import distance
 from skimage.filters import threshold_yen
@@ -11,6 +12,8 @@ from skimage.morphology import dilation, square
 from scipy import stats
 import matplotlib.pyplot as plt
 from collections import defaultdict
+
+from keras_retinanet.utils.image import preprocess_image, resize_image
 
 
 class VideoWriterThread(QThread):
@@ -82,6 +85,18 @@ class DetectionThread(QThread):
     def __del__(self):
         self.wait()
 
+    def detect(self, image):
+        image = preprocess_image(image)
+        image, scale = resize_image(image)
+        boxes, scores, labels = self.model.predict_on_batch(np.expand_dims(image, axis=0))
+        boxes /= scale
+        cells = []
+        for cell, score in zip(boxes[0], scores[0]):
+            if score > 0.1:
+                cells.append(tuple(cell))
+
+        return cells, scores[0]
+
     def movement_cell_locations(self, frame):
         try:
             thresh = threshold_yen(frame)
@@ -117,17 +132,16 @@ class DetectionThread(QThread):
     #     # croped = (frame[:, :, 0] / 50).astype('uint8')
     #     return croped
     #
-    def cell_detect(self, window):
-        sumframe = np.sum(window, axis=0)
-        sumframe = (sumframe / 50).astype('uint8')
-        cellLocs = self.movement_cell_locations(sumframe)
-        plt.imshow(sumframe)
-        plt.show()
+    def cell_detect(self, image):
+        cellLocs = self.movement_cell_locations(image)
+        # plt.imshow(image)
+        # plt.show()
         if len(cellLocs) > 10:
             cellLocs = []
         return cellLocs
 
     def run(self):
+        self.model = models.load_model('src/resnet50.h5', backbone_name='resnet50')
         QApplication.processEvents()
         frame_lenght = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         frameWidth = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -161,6 +175,8 @@ class DetectionThread(QThread):
         gaps = find_inactive(bin_signal)
         map = defaultdict(lambda: None)
         log = []
+        v_max = 11
+        v_min = 2
         if len(gaps) != 0:
             for gap in gaps:
                 lenght = gap[1]-gap[0]
@@ -168,21 +184,23 @@ class DetectionThread(QThread):
                 step_size = int(lenght/(n_vote-1))
                 window_size = 50
                 sum_size = window_size-1
-                m_cell_count = []
-                for last in range(gap[0]+sum_size,gap[1],step_size):
-                    self.cap.set(cv2.CAP_PROP_POS_FRAMES, last)
-                    _, frame = self.cap.read()
-                    area = self.find_count_area(frame)
-                    # window = diff_frames[last-sum_size:last]
-                    # sumframe = np.sum(window, axis=1)
-                    # sumframe = (sumframe/window_size).astype('uint8')
-                    cellLocs = self.cell_detect(diff_frames[last-sum_size:last])
-                    m_cell_count.append(len(cellLocs))
-                    for i in range(last-sum_size, last + 1):
-                        o = {'area': area, 'cell_bndbox': cellLocs}
-                        map[i] = o
-                print(m_cell_count)
-                log.append({'min_time': gap[0], 'max_time': gap[1], 'cells_count': len(cellLocs)})
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, gap[0])
+                _, frame = self.cap.read()
+                area = self.find_count_area(frame)
+                window = diff_frames[gap[0]:gap[0]+window_size]
+                sumframe = np.sum(window, axis=0)
+                aveframe = (sumframe/sum_size+1)
+                aveframe[aveframe > v_max] = v_max
+                aveframe[aveframe < v_min] = v_min
+                aveframe = (sumframe / len(window)).astype('uint8')
+                normframe = (((aveframe - v_min) / (v_max - v_min)) * 255).astype('uint8')
+                image = np.stack((normframe,) * 3, axis=-1)
+                cell_locs, scores = self.detect(image)
+                print(cell_locs)
+                for i in range(gap[0], gap[1] + 1):
+                    o = {'area': area, 'cell_bndbox': cell_locs}
+                    map[i] = o
+                log.append({'min_time': gap[0], 'max_time': gap[1], 'cells_count': len(cell_locs)})
                 # for cell in cellLocs:
                 #     top, left, bottom, right = cell.bbox
                 #     output = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)

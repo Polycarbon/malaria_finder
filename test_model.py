@@ -1,4 +1,5 @@
 # %%
+from collections import defaultdict
 from scipy.ndimage import binary_closing
 from scipy.spatial import distance
 from skimage.filters import threshold_yen
@@ -15,8 +16,9 @@ from keras_retinanet.utils.colors import label_color
 from keras_retinanet.utils.gpu import setup_gpu
 
 # %%
+file_name = 'src/manual_1.MOV'
 # file_name = 'src/1-1.mp4'
-file_name = 'src/1-1.mp4'
+# file_name = 'src/m1.avi'
 cap = cv2.VideoCapture(file_name)
 frame_lenght = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 frameWidth = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -83,7 +85,7 @@ bin_signal = diff_frame_ratio > 2.75
 bin_signal = binary_closing(bin_signal, structure=np.ones(40))
 gaps = find_inactive(bin_signal)
 # %%
-model = models.load_model('src/resnet50.h5', backbone_name='resnet50')
+model = models.load_model('src/resnet50v2conf_67.h5', backbone_name='resnet50')
 labels_to_names = {0: 'abnormal'}
 
 
@@ -114,19 +116,48 @@ def detect(image):
     plt.show()
 
 
+def cell_detect(frame):
+    try:
+        thresh = threshold_yen(frame)
+    except:
+        thresh = threshold_yen(frame)
+    binary = frame >= thresh
+    closed = binary_closing(binary)
+    # dilated = dilation(binary, square(5))
+    label_img = label(closed)
+    cellLocs = regionprops(label_img)
+    cellLocs = [p for p in cellLocs if p.area > 100]
+    return cellLocs
+
+
 # %%
+v_max = 11
+v_min = 2
+maps = defaultdict(lambda: None)
 for gap in gaps:
     lenght = gap[1] - gap[0]
-    window = diff_frames[gap[0]:gap[0]+50]
+    window = diff_frames[gap[0]:gap[0] + 50]
     sumframe = np.sum(window, axis=0)
-    sumframe = (sumframe / len(window) + 1)
-    sumframe = cv2.normalize(sumframe, None, alpha = 0, beta = 255, norm_type = cv2.NORM_MINMAX, dtype = cv2.CV_32F).astype('uint8')
-    image = np.stack((sumframe,)*3, axis=-1)
-    # plt.imshow(sumframe)
+    aveframe = (sumframe / len(window) + 1)
+    aveframe[aveframe > v_max] = v_max
+    aveframe[aveframe < v_min] = v_min
+    normframe = (((aveframe - v_min) / (v_max - v_min)) * 255).astype('uint8')
+    image = np.stack((normframe,) * 3, axis=-1)
+    detect(image)
+    # plt.imshow(normframe,vmax=255,vmin=0)
+    # plt.show()
+    # print("min:{} -- max:{}".format(aveframe.min(),aveframe.max()))
+    # sumframe = cv2.normalize(sumframe, None, alpha = 0, beta = 255, norm_type = cv2.NORM_MINMAX, dtype = cv2.CV_32F).astype('uint8')
+    # image = np.stack((normframe,) * 3, axis=-1)
+    # cell_locs = cell_detect(normframe)
+    # for i in range(gap[0], gap[1] + 1):
+    #     o = {'area': None, 'cells': cell_locs}
+    #     maps[i] = o
+    # plt.imshow(aveframe,vmax=9,vmin=2.0)
     # plt.show()
     # plt.imshow(image)
     # plt.show()
-    detect(image)
+    # detect(image)
     # plt.imshow(sumframe, cmap='grey')
     # plt.show()
     # n_vote = 5
@@ -137,3 +168,40 @@ for gap in gaps:
     #     cap.set(cv2.CAP_PROP_POS_FRAMES, last)
     #     _, frame = cap.read()
     #     area = find_count_area(frame)
+# %%
+cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+trackers = cv2.MultiTracker_create()
+tracker = cv2.TrackerCSRT_create()
+frame_id = 0
+prev_map = None
+while True:
+    ret, frame = cap.read()
+    if frame is None:
+        # There are no more frames available to stabilize
+        break
+    map = maps[frame_id]
+    if map is not None:
+        prev_map = None
+        for cell in map['cells']:
+            top, left, bottom, right = cell.bbox
+            cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+    else:
+        if prev_map is None:
+            trackers = cv2.MultiTracker_create()
+            prev_map = maps[frame_id-1]
+            for cell in prev_map['cells']:
+                tracker = cv2.TrackerCSRT_create()
+                trackers.add(tracker, frame, cell.bbox)
+                # tracker.init(frame,cell.bbox)
+        else:
+            (success, boxes) = trackers.update(frame)
+            if success:
+                # top, left, bottom, right = boxes
+                # cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+                for top, left, bottom, right in boxes:
+                    cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
+
+    cv2.imshow('Frame', frame)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+    frame_id += 1

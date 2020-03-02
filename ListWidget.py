@@ -26,9 +26,9 @@ class QCustomQWidget(QWidget):
         self.allQHBoxLayout.addWidget(self.cellNumber, 1)
         self.setLayout(self.allQHBoxLayout)
         # setStyleSheet
-        self.textUpQLabel.setStyleSheet('''
-            color: rgb(0, 0, 255);
-        ''')
+        # self.textUpQLabel.setStyleSheet('''
+        #     color: rgb(0, 0, 255);
+        # ''')
         # self.textDownQLabel.setStyleSheet('''
         #     color: rgb(255, 0, 0);
         # ''')
