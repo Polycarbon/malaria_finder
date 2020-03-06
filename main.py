@@ -1,4 +1,5 @@
 # This Python file uses the following encoding: utf-8
+import logging
 import sys
 import os
 from PyQt5.QtWidgets import QApplication
@@ -72,10 +73,14 @@ QPushButton
     padding-left: 5px;
     padding-right: 5px;
 }"""
+
+logging.basicConfig(format="%(threadName)s:%(message)s")
+logger = logging.getLogger('data flow')
+logger.setLevel(logging.DEBUG)
 if __name__ == "__main__":
     app = QApplication([])
     window = MainWindow()
-    window.setStyleSheet(styleData)
+    # window.setStyleSheet(styleData)
     window.setFixedSize(window.size())
     window.show()
     sys.exit(app.exec_())

@@ -1,3 +1,5 @@
+import logging
+
 import cv2
 from PyQt5.QtCore import QThread
 from PyQt5 import QtCore
@@ -14,10 +16,10 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 
 from keras_retinanet.utils.image import preprocess_image, resize_image
+logger = logging.getLogger('data flow')
 
 
 class VideoWriterThread(QThread):
-
     onUpdateProgress = QtCore.pyqtSignal(int)
 
     def __init__(self, cap, map, file_name, mode='All'):
@@ -40,10 +42,10 @@ class VideoWriterThread(QThread):
         for i in range(0, flenght):
             ret, frame = self.cap.read()
             bnd = self.map[i]
-            if bnd :
+            if bnd:
                 top, left, bottom, right = bnd['area'].bbox
                 cv2.rectangle(frame, (left, top), (right, bottom), (255, 0, 0), 2)
-                cv2.putText(frame, 'count : '+str(len(bnd['cell_bndbox'])), (10, 30),
+                cv2.putText(frame, 'count : ' + str(len(bnd['cell_bndbox'])), (10, 30),
                             fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1,
                             color=(255, 255, 255))
                 for cell in bnd['cell_bndbox']:
@@ -75,6 +77,7 @@ def find_inactive(bin_signal):
 
 
 class DetectionThread(QThread):
+    onImageReady = QtCore.pyqtSignal(np.ndarray)
     onFinish = QtCore.pyqtSignal(defaultdict, list)
     onUpdateProgress = QtCore.pyqtSignal(int)
 
@@ -141,8 +144,8 @@ class DetectionThread(QThread):
         return cellLocs
 
     def run(self):
-        self.model = models.load_model('src/resnet50.h5', backbone_name='resnet50')
         QApplication.processEvents()
+        logger.info('start preprocess video')
         frame_lenght = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         frameWidth = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         frameHeight = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -179,33 +182,33 @@ class DetectionThread(QThread):
         v_min = 2
         if len(gaps) != 0:
             for gap in gaps:
-                lenght = gap[1]-gap[0]
+                lenght = gap[1] - gap[0]
                 n_vote = 5
-                step_size = int(lenght/(n_vote-1))
+                step_size = int(lenght / (n_vote - 1))
                 window_size = 50
-                sum_size = window_size-1
+                sum_size = window_size - 1
                 self.cap.set(cv2.CAP_PROP_POS_FRAMES, gap[0])
                 _, frame = self.cap.read()
                 area = self.find_count_area(frame)
-                window = diff_frames[gap[0]:gap[0]+window_size]
+                window = diff_frames[gap[0]:gap[0] + window_size]
                 sumframe = np.sum(window, axis=0)
-                aveframe = (sumframe/sum_size+1)
+                aveframe = (sumframe / sum_size + 1)
                 aveframe[aveframe > v_max] = v_max
                 aveframe[aveframe < v_min] = v_min
                 aveframe = (sumframe / len(window)).astype('uint8')
                 normframe = (((aveframe - v_min) / (v_max - v_min)) * 255).astype('uint8')
                 image = np.stack((normframe,) * 3, axis=-1)
-                cell_locs, scores = self.detect(image)
-                print(cell_locs)
-                for i in range(gap[0], gap[1] + 1):
-                    o = {'area': area, 'cell_bndbox': cell_locs}
-                    map[i] = o
-                log.append({'min_time': gap[0], 'max_time': gap[1], 'cells_count': len(cell_locs)})
-                # for cell in cellLocs:
-                #     top, left, bottom, right = cell.bbox
-                #     output = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                #     output = cv2.rectangle(output, (left, top), (right, bottom), (0, 255, 0), 2)
-                #     plt.imshow(output)
-                #     plt.show()
-
-        self.onFinish.emit(map, log)
+                self.onImageReady.emit(image)
+        #         print(cell_locs)
+        #         for i in range(gap[0], gap[1] + 1):
+        #             o = {'area': area, 'cell_bndbox': cell_locs}
+        #             map[i] = o
+        #         log.append({'min_time': gap[0], 'max_time': gap[1], 'cells_count': len(cell_locs)})
+        #         # for cell in cellLocs:
+        #         #     top, left, bottom, right = cell.bbox
+        #         #     output = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        #         #     output = cv2.rectangle(output, (left, top), (right, bottom), (0, 255, 0), 2)
+        #         #     plt.imshow(output)
+        #         #     plt.show()
+        #
+        # self.onFinish.emit(map, log)

@@ -9,6 +9,7 @@ from PyQt5.QtMultimediaWidgets import QVideoWidget
 from PyQt5.QtWidgets import QMainWindow, QVBoxLayout, QStyle, QFileDialog, QListWidgetItem
 from PyQt5.uic import loadUi
 
+from Detector import CellDetector
 from ListWidget import ListWidget, QCustomQWidget
 from ProcessDialog import ProcessDialog
 from VideoWidget import VideoWidget
@@ -24,6 +25,7 @@ class MainWindow(QMainWindow):
         # self.ui.setupUi(self)
         self.mediaPlayer = QMediaPlayer(None, QMediaPlayer.VideoSurface)
         self.videoWidget = VideoWidget(self)
+        self.detector = CellDetector()
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.videoWidget)
@@ -35,6 +37,7 @@ class MainWindow(QMainWindow):
         self.ui.saveButton.clicked.connect(self.saveFile)
         self.ui.saveButton.setEnabled(False)
         self.ui.timeSlider.sliderMoved.connect(self.setPosition)
+        self.ui.statusbar.showMessage("Init Model ...")
         self.mediaPlayer.setVideoOutput(self.videoWidget.videoSurface())
         self.mediaPlayer.stateChanged.connect(self.mediaStateChanged)
         self.mediaPlayer.positionChanged.connect(self.positionChanged)
@@ -43,6 +46,10 @@ class MainWindow(QMainWindow):
         # # self.ui.statusBar.setSizeGripEnabled(False)
         # self.show()
         # self.setFixedSize(s_max)
+
+    def showEvent(self, *args, **kwargs):
+        self.detector.onInitModelSuccess.connect(lambda: self.ui.statusbar.showMessage("Ready"))
+        self.detector.initModel()
 
     def openFile(self):
         file_name = QFileDialog.getOpenFileName(self, "Open Video")[0]
@@ -53,6 +60,7 @@ class MainWindow(QMainWindow):
             dialog = ProcessDialog()
             dialog.setMaximum(length)
             worker = DetectionThread(self.cap)
+            worker.onImageReady.connect(self.detector.detect)
             worker.onUpdateProgress.connect(dialog.updateProgress)
             worker.onFinish.connect(self.setOutput)
             worker.finished.connect(dialog.close)
@@ -65,9 +73,8 @@ class MainWindow(QMainWindow):
             self.ui.playButton.setEnabled(True)
             self.ui.saveButton.setEnabled(True)
 
-
     def saveFile(self):
-        worker = VideoWriterThread(self.cap,self.map,'output.avi')
+        worker = VideoWriterThread(self.cap, self.map, 'output.avi')
         dialog = ProcessDialog()
         length = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         dialog.setMaximum(length)
@@ -80,7 +87,7 @@ class MainWindow(QMainWindow):
     def setOutput(self, map, logs):
         length = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         duration = self.mediaPlayer.duration()
-        self.videoWidget.setOutput(map,duration/length)
+        self.videoWidget.setOutput(map, duration / length)
         self.map = map
 
         sum = 0
@@ -115,7 +122,6 @@ class MainWindow(QMainWindow):
         self.ui.timeSlider.setValue(position)
 
     def durationChanged(self, duration):
-        print(duration)
         self.ui.timeSlider.setRange(0, duration)
 
     def setPosition(self, position):
