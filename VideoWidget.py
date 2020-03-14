@@ -114,7 +114,7 @@ class VideoWidgetSurface(QAbstractVideoSurface):
                 painter.setBrush(Qt.NoBrush)
                 painter.setPen(Qt.blue)
                 painter.drawRect(scale_box)
-                for cell in bnd['cell_bndbox']:
+                for cell in bnd['cells']:
                     # top, left, bottom, right = cell.bbox
                     left, top, right, bottom = cell
                     cell_box = QRect(QPoint(left, top), QPoint(right, bottom))

@@ -76,14 +76,15 @@ def find_inactive(bin_signal):
     return np.array(gaps)
 
 
-class DetectionThread(QThread):
-    onImageReady = QtCore.pyqtSignal(np.ndarray)
-    onFinish = QtCore.pyqtSignal(defaultdict, list)
+class PreprocessThread(QThread):
+    onImageReady = QtCore.pyqtSignal(list, np.ndarray)
+    onFinish = QtCore.pyqtSignal()
     onUpdateProgress = QtCore.pyqtSignal(int)
 
-    def __init__(self, cap):
+    def __init__(self, cap, objectmap):
         QThread.__init__(self)
         self.cap = cap
+        self.objectmap = objectmap
 
     def __del__(self):
         self.wait()
@@ -176,7 +177,6 @@ class DetectionThread(QThread):
         bin_signal = diff_frame_ratio > 2.75
         bin_signal = binary_closing(bin_signal, structure=np.ones(40))
         gaps = find_inactive(bin_signal)
-        map = defaultdict(lambda: None)
         log = []
         v_max = 11
         v_min = 2
@@ -190,6 +190,9 @@ class DetectionThread(QThread):
                 self.cap.set(cv2.CAP_PROP_POS_FRAMES, gap[0])
                 _, frame = self.cap.read()
                 area = self.find_count_area(frame)
+                key_list = list(range(gap[0],gap[1]))
+                map = zip(key_list, [{'area': area}]*lenght)
+                self.objectmap.update(dict(map))
                 window = diff_frames[gap[0]:gap[0] + window_size]
                 sumframe = np.sum(window, axis=0)
                 aveframe = (sumframe / sum_size + 1)
@@ -198,7 +201,7 @@ class DetectionThread(QThread):
                 aveframe = (sumframe / len(window)).astype('uint8')
                 normframe = (((aveframe - v_min) / (v_max - v_min)) * 255).astype('uint8')
                 image = np.stack((normframe,) * 3, axis=-1)
-                self.onImageReady.emit(image)
+                self.onImageReady.emit(key_list, image)
         #         print(cell_locs)
         #         for i in range(gap[0], gap[1] + 1):
         #             o = {'area': area, 'cell_bndbox': cell_locs}
@@ -211,4 +214,4 @@ class DetectionThread(QThread):
         #         #     plt.imshow(output)
         #         #     plt.show()
         #
-        # self.onFinish.emit(map, log)
+        self.onFinish.emit()

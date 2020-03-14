@@ -28,7 +28,10 @@ class CellDetector(QObject):
         self.onInitModelSuccess.emit()
         logger.info('Init Model Success')
 
-    def detect(self, image):
+    def setObjectMap(self,objectmap):
+        self.objectmap = objectmap
+
+    def detect(self, key_list, image):
         logger.info('Detecting Image')
         image = preprocess_image(image)
         image, scale = resize_image(image)
@@ -41,4 +44,7 @@ class CellDetector(QObject):
                 cells.append(tuple(cell))
                 sc.append(score)
         self.onDetectSuccess.emit(cells, sc)
+        for key in key_list:
+            self.objectmap[key]['cells'] = cells
+
         logger.info('cell location : {}'.format(str(cells)))

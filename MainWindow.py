@@ -1,5 +1,6 @@
 # This Python file uses the following encoding: utf-8
 import os
+from collections import defaultdict
 
 import cv2
 from PyQt5 import QtCore
@@ -9,11 +10,12 @@ from PyQt5.QtMultimediaWidgets import QVideoWidget
 from PyQt5.QtWidgets import QMainWindow, QVBoxLayout, QStyle, QFileDialog, QListWidgetItem
 from PyQt5.uic import loadUi
 
+from DetectedObject import ObjectMap
 from Detector import CellDetector
 from ListWidget import ListWidget, QCustomQWidget
 from ProcessDialog import ProcessDialog
 from VideoWidget import VideoWidget
-from Worker import DetectionThread, VideoWriterThread
+from Worker import PreprocessThread, VideoWriterThread
 from forms.Ui_mainwindow import Ui_MainWindow
 
 
@@ -26,6 +28,7 @@ class MainWindow(QMainWindow):
         self.mediaPlayer = QMediaPlayer(None, QMediaPlayer.VideoSurface)
         self.videoWidget = VideoWidget(self)
         self.detector = CellDetector()
+        self.objectmap = defaultdict()
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.videoWidget)
@@ -50,6 +53,7 @@ class MainWindow(QMainWindow):
     def showEvent(self, *args, **kwargs):
         self.detector.onInitModelSuccess.connect(lambda: self.ui.statusbar.showMessage("Ready"))
         self.detector.initModel()
+        self.detector.setObjectMap(self.objectmap)
 
     def openFile(self):
         file_name = QFileDialog.getOpenFileName(self, "Open Video")[0]
@@ -59,7 +63,7 @@ class MainWindow(QMainWindow):
             length = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
             dialog = ProcessDialog()
             dialog.setMaximum(length)
-            worker = DetectionThread(self.cap)
+            worker = PreprocessThread(self.cap, self.objectmap)
             worker.onImageReady.connect(self.detector.detect)
             worker.onUpdateProgress.connect(dialog.updateProgress)
             worker.onFinish.connect(self.setOutput)
@@ -84,27 +88,26 @@ class MainWindow(QMainWindow):
         worker.start()
         dialog.exec_()
 
-    def setOutput(self, map, logs):
+    def setOutput(self):
         length = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         duration = self.mediaPlayer.duration()
-        self.videoWidget.setOutput(map, duration / length)
-        self.map = map
+        self.videoWidget.setOutput(self.objectmap, duration / length)
 
-        sum = 0
-        for log in logs:
-            # Create QCustomQWidget
-            myQCustomQWidget = QCustomQWidget()
-            sum += log['cells_count']
-            myQCustomQWidget.setCount(log['cells_count'])
-            myQCustomQWidget.setTimeText(log['min_time'])
-            # Create QListWidgetItem
-            myQListWidgetItem = QListWidgetItem(self.ui.listWidget)
-            # Set size hint
-            myQListWidgetItem.setSizeHint(myQCustomQWidget.sizeHint())
-            # Add QListWidgetItem into QListWidget
-            self.ui.listWidget.addItem(myQListWidgetItem)
-            self.ui.listWidget.setItemWidget(myQListWidgetItem, myQCustomQWidget)
-        self.ui.totalNumber.display(sum)
+        # sum = 0
+        # for log in logs:
+        #     # Create QCustomQWidget
+        #     myQCustomQWidget = QCustomQWidget()
+        #     sum += log['cells_count']
+        #     myQCustomQWidget.setCount(log['cells_count'])
+        #     myQCustomQWidget.setTimeText(log['min_time'])
+        #     # Create QListWidgetItem
+        #     myQListWidgetItem = QListWidgetItem(self.ui.listWidget)
+        #     # Set size hint
+        #     myQListWidgetItem.setSizeHint(myQCustomQWidget.sizeHint())
+        #     # Add QListWidgetItem into QListWidget
+        #     self.ui.listWidget.addItem(myQListWidgetItem)
+        #     self.ui.listWidget.setItemWidget(myQListWidgetItem, myQCustomQWidget)
+        # self.ui.totalNumber.display(sum)
 
     def play(self):
         if self.mediaPlayer.state() == QMediaPlayer.PlayingState:
