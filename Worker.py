@@ -147,71 +147,100 @@ class PreprocessThread(QThread):
     def run(self):
         QApplication.processEvents()
         logger.info('start preprocess video')
-        frame_lenght = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        frameCount = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         frameWidth = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         frameHeight = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        target_size = (frameHeight, frameWidth)
+        fps = self.cap.get(cv2.CAP_PROP_FPS)
         # target_size = (64, 64)
-        ret, frame = self.cap.read()
-        frame_id = 0
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        # resize = cv2.resize(gray, target_size).astype("int16")
-        resize = gray
-        prev_frame = resize
-        window_size = 4000
-        diff_frames = np.empty((frame_lenght - 1, *target_size), np.dtype('int16'))
-        while frame_id < frame_lenght - 1:
-            ret, frame = self.cap.read()
+        _, prev = self.cap.read()
+        prev_gray = cv2.cvtColor(prev, cv2.COLOR_BGR2GRAY)
+        dxs = [0]
+        dys = [0]
+        for frameId in range(1,frameCount):
+            # Detect feature points in previous frame
+            prev_pts = cv2.goodFeaturesToTrack(prev_gray,
+                                               maxCorners=200,
+                                               qualityLevel=0.01,
+                                               minDistance=30,
+                                               blockSize=100)
+            # Read next frame
+            success, curr = self.cap.read()
+            if not success:
+                break
+            # Convert to grayscale
+            curr_gray = cv2.cvtColor(curr, cv2.COLOR_BGR2GRAY)
+            # Calculate optical flow (i.e. track feature points)
+            curr_pts, status, err = cv2.calcOpticalFlowPyrLK(prev_gray, curr_gray, prev_pts, None)
+            # Sanity check
+            assert prev_pts.shape == curr_pts.shape
+            # Filter only valid points
+            idx = np.where(status == 1)[0]
+            prev_pts = prev_pts[idx]
+            curr_pts = curr_pts[idx]
+            # Find transformation matrix
+            H, inliers = cv2.estimateAffine2D(prev_pts, curr_pts)
+            # Extract traslation
+            dx = H[0, 2]
+            dy = H[1, 2]
+            dxs.append(dx)
+            dys.append(dy)
+            # Extract rotation angle
+            da = np.arctan2(H[1, 0], H[0, 0])
+            # Move to next frame
+            prev_gray = curr_gray
 
-            frame_id += 1
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            # resize = cv2.resize(gray, target_size).astype("int16")
-            resize = gray.astype("int16")
-            diff_frames[frame_id - 1] = np.abs(resize - prev_frame)
-
-            prev_frame = resize
-
-            self.onUpdateProgress.emit(frame_id)
-        kernel = (64, 64)
-        diff_frame_ratio = np.sum(diff_frames[:, :kernel[0], :kernel[1]], axis=(1, 2)) / (kernel[0] * kernel[1])
-        bin_signal = diff_frame_ratio > 2.75
-        bin_signal = binary_closing(bin_signal, structure=np.ones(40))
-        gaps = find_inactive(bin_signal)
-        log = []
-        v_max = 11
-        v_min = 2
-        if len(gaps) != 0:
-            for gap in gaps:
-                lenght = gap[1] - gap[0]
-                n_vote = 5
-                step_size = int(lenght / (n_vote - 1))
-                window_size = 50
-                sum_size = window_size - 1
-                self.cap.set(cv2.CAP_PROP_POS_FRAMES, gap[0])
-                _, frame = self.cap.read()
-                area = self.find_count_area(frame)
-                key_list = list(range(gap[0],gap[1]))
-                map = zip(key_list, [{'area': area}]*lenght)
-                self.objectmap.update(dict(map))
-                window = diff_frames[gap[0]:gap[0] + window_size]
-                sumframe = np.sum(window, axis=0)
-                aveframe = (sumframe / sum_size + 1)
-                aveframe[aveframe > v_max] = v_max
-                aveframe[aveframe < v_min] = v_min
-                aveframe = (sumframe / len(window)).astype('uint8')
-                normframe = (((aveframe - v_min) / (v_max - v_min)) * 255).astype('uint8')
-                image = np.stack((normframe,) * 3, axis=-1)
-                self.onImageReady.emit(key_list, image)
-        #         print(cell_locs)
-        #         for i in range(gap[0], gap[1] + 1):
-        #             o = {'area': area, 'cell_bndbox': cell_locs}
-        #             map[i] = o
-        #         log.append({'min_time': gap[0], 'max_time': gap[1], 'cells_count': len(cell_locs)})
-        #         # for cell in cellLocs:
-        #         #     top, left, bottom, right = cell.bbox
-        #         #     output = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        #         #     output = cv2.rectangle(output, (left, top), (right, bottom), (0, 255, 0), 2)
-        #         #     plt.imshow(output)
-        #         #     plt.show()
-        #
+        dys = np.array(dys)
+        dxs = np.array(dxs)
+        dz = np.sqrt(dxs ** 2 + dys ** 2)
+        dt = np.cumsum(dz)
+        kernelSize = int(fps*2)
+        bx = np.abs(dxs) > 1.0
+        by = np.abs(dys) > 1.0
+        bn = bx | by
+        bn = binary_closing(bn, structure=np.ones(kernelSize))
+        plt.figure(figsize=(20, 5))
+        plt.plot(bn)
+        plt.show()
+        # kernel = (64, 64)
+        # diff_frame_ratio = np.sum(diff_frames[:, :kernel[0], :kernel[1]], axis=(1, 2)) / (kernel[0] * kernel[1])
+        # bin_signal = diff_frame_ratio > 2.75
+        # bin_signal = binary_closing(bin_signal, structure=np.ones(40))
+        # gaps = find_inactive(bin_signal)
+        # log = []
+        # v_max = 11
+        # v_min = 2
+        # if len(gaps) != 0:
+        #     for gap in gaps:
+        #         lenght = gap[1] - gap[0]
+        #         n_vote = 5
+        #         step_size = int(lenght / (n_vote - 1))
+        #         window_size = 50
+        #         sum_size = window_size - 1
+        #         self.cap.set(cv2.CAP_PROP_POS_FRAMES, gap[0])
+        #         _, frame = self.cap.read()
+        #         area = self.find_count_area(frame)
+        #         key_list = list(range(gap[0],gap[1]))
+        #         map = zip(key_list, [{'area': area}]*lenght)
+        #         self.objectmap.update(dict(map))
+        #         window = diff_frames[gap[0]:gap[0] + window_size]
+        #         sumframe = np.sum(window, axis=0)
+        #         aveframe = (sumframe / sum_size + 1)
+        #         aveframe[aveframe > v_max] = v_max
+        #         aveframe[aveframe < v_min] = v_min
+        #         aveframe = (sumframe / len(window)).astype('uint8')
+        #         normframe = (((aveframe - v_min) / (v_max - v_min)) * 255).astype('uint8')
+        #         image = np.stack((normframe,) * 3, axis=-1)
+        #         self.onImageReady.emit(key_list, image)
+        # #         print(cell_locs)
+        # #         for i in range(gap[0], gap[1] + 1):
+        # #             o = {'area': area, 'cell_bndbox': cell_locs}
+        # #             map[i] = o
+        # #         log.append({'min_time': gap[0], 'max_time': gap[1], 'cells_count': len(cell_locs)})
+        # #         # for cell in cellLocs:
+        # #         #     top, left, bottom, right = cell.bbox
+        # #         #     output = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # #         #     output = cv2.rectangle(output, (left, top), (right, bottom), (0, 255, 0), 2)
+        # #         #     plt.imshow(output)
+        # #         #     plt.show()
+        # #
         self.onFinish.emit()
