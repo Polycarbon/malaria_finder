@@ -17,16 +17,19 @@ class ProcessName(enum.Enum):
 
 
 class ProcessDialog(QDialog):
+    closed = QtCore.pyqtSignal()
 
-    def __init__(self):
+    def __init__(self, parent=None):
         super(ProcessDialog, self).__init__()
         self.ui = loadUi('forms/processdialog.ui', self)
         self.ui.buttonBox.rejected.connect(self.close)
         self.setWindowTitle('Processing')
         self.setFixedSize(self.size())
-        self.setWindowFlags(QtCore.Qt.WindowStaysOnTopHint)
+        # self.setWindowFlags(QtCore.Qt.WindowStaysOnTopHint)
 
-    # def closeEvent(self, event):
+    def closeEvent(self, event):
+        self.closed.emit()
+        event.accept()
     #     if self.worker.isRunning():
     #         reply = QMessageBox.question(self, 'Window Close', 'Are you sure you want to close the window?',
     #                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)

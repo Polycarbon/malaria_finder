@@ -7,7 +7,7 @@ from PyQt5 import QtCore
 from PyQt5.QtCore import QUrl
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PyQt5.QtMultimediaWidgets import QVideoWidget
-from PyQt5.QtWidgets import QMainWindow, QVBoxLayout, QStyle, QFileDialog, QListWidgetItem
+from PyQt5.QtWidgets import QMainWindow, QVBoxLayout, QStyle, QFileDialog, QListWidgetItem, QApplication
 from PyQt5.uic import loadUi
 from imutils.video import count_frames
 from DetectedObject import ObjectMap
@@ -52,13 +52,9 @@ class MainWindow(QMainWindow):
     def showEvent(self, *args, **kwargs):
         self.detector.onInitModelSuccess.connect(lambda: self.ui.statusbar.showMessage("Ready"))
         self.detector.initModel()
-        self.mapWorker = ObjectMappingThread()
-        self.mapWorker.onUpdateObject.connect(self.updateObject)
-        self.detector.onDetectSuccess.connect(self.mapWorker.queueCellObjects)
-        self.ppcWorker = PreprocessThread()
-        self.ppcWorker.onFrameMove.connect(self.mapWorker.setFrameMove)
-        self.ppcWorker.onBufferReady.connect(self.detector.detect)
-        # self.ppcWorker.onFinish.connect(self.setOutput)
+
+    def closeEvent(self, *args, **kwargs):
+        QApplication.closeAllWindows()
 
     def openFile(self):
         file_name = QFileDialog.getOpenFileName(self, "Open Video")[0]
@@ -66,19 +62,23 @@ class MainWindow(QMainWindow):
             self.mediaPlayer.setMedia(QMediaContent(QUrl.fromLocalFile(file_name)))
             self.cap = cv2.VideoCapture(file_name)
             self.frameCount = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            dialog = ProcessDialog()
+            dialog = ProcessDialog(self)
             dialog.setMaximum(self.frameCount)
-            self.ppcWorker.set_videoStream(file_name)
-            self.mapWorker.set_videoStream(file_name)
-            self.mapWorker.onUpdateProgress.connect(dialog.updateProgress)
-            self.ppcWorker.onUpdateProgress.connect(dialog.updateProgress)
-            # ppcWorker.finished.connect(dialog.close)
+            map_worker = ObjectMappingThread()
+            map_worker.onUpdateObject.connect(self.updateObject)
+            map_worker.onUpdateProgress.connect(dialog.updateProgress)
+            ppc_worker = PreprocessThread(file_name)
+            ppc_worker.onFrameChanged.connect(map_worker.setFrameMove)
+            ppc_worker.onBufferReady.connect(self.detector.detect)
+            ppc_worker.onUpdateProgress.connect(dialog.updateProgress)
+            dialog.closed.connect(ppc_worker.terminate)
+            dialog.closed.connect(map_worker.terminate)
+            self.detector.onDetectSuccess.connect(map_worker.queueCellObjects)
+            # ppc_worker.finished.connect(dialog.close)
             # dialog.onReady2Read.connect(self.setOutput)
             dialog.show()
-            self.mapWorker.start()
-            self.ppcWorker.start()
-            # self.ui_dialog = Ui_Dialog()
-            # self.ui_dialog.setupUi(dialog)
+            map_worker.start()
+            ppc_worker.start()
             dialog.exec_()
             self.ui.playButton.setEnabled(True)
             self.ui.saveButton.setEnabled(True)

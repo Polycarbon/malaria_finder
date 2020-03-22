@@ -12,7 +12,7 @@ logger = logging.getLogger('data flow')
 
 class CellDetector(QObject):
     onInitModelSuccess = QtCore.pyqtSignal()
-    onDetectSuccess = QtCore.pyqtSignal(list, np.ndarray, list, list)
+    onDetectSuccess = QtCore.pyqtSignal(int, list, list)
 
     def __init__(self, parent=None):
         super(CellDetector, self).__init__(parent)
@@ -31,7 +31,7 @@ class CellDetector(QObject):
     def setObjectMap(self,objectmap):
         self.objectmap = objectmap
 
-    def detect(self, key_list, ds, buffer):
+    def detect(self, cur_frame_id, buffer):
         logger.info('Detecting Image')
         v_max = 11
         v_min = 2
@@ -56,7 +56,7 @@ class CellDetector(QObject):
             if score > 0.5:
                 cells.append(tuple(cell))
                 sc.append(score)
-        self.onDetectSuccess.emit(key_list, ds, cells, sc)
+        self.onDetectSuccess.emit(cur_frame_id, cells, sc)
         # for key in key_list:
         #     self.objectmap[key]['cells'] = cells
         #
