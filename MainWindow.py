@@ -9,13 +9,13 @@ from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PyQt5.QtMultimediaWidgets import QVideoWidget
 from PyQt5.QtWidgets import QMainWindow, QVBoxLayout, QStyle, QFileDialog, QListWidgetItem
 from PyQt5.uic import loadUi
-
+from imutils.video import count_frames
 from DetectedObject import ObjectMap
 from Detector import CellDetector
 from ListWidget import ListWidget, QCustomQWidget
 from ProcessDialog import ProcessDialog
 from VideoWidget import VideoWidget
-from Worker import PreprocessThread, VideoWriterThread
+from Worker import PreprocessThread, VideoWriterThread, ObjectMappingThread
 from forms.Ui_mainwindow import Ui_MainWindow
 
 
@@ -28,7 +28,6 @@ class MainWindow(QMainWindow):
         self.mediaPlayer = QMediaPlayer(None, QMediaPlayer.VideoSurface)
         self.videoWidget = VideoWidget(self)
         self.detector = CellDetector()
-        self.objectmap = defaultdict()
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.videoWidget)
@@ -53,24 +52,31 @@ class MainWindow(QMainWindow):
     def showEvent(self, *args, **kwargs):
         self.detector.onInitModelSuccess.connect(lambda: self.ui.statusbar.showMessage("Ready"))
         self.detector.initModel()
-        self.detector.setObjectMap(self.objectmap)
+        self.mapWorker = ObjectMappingThread()
+        self.mapWorker.onUpdateObject.connect(self.updateObject)
+        self.detector.onDetectSuccess.connect(self.mapWorker.queueCellObjects)
+        self.ppcWorker = PreprocessThread()
+        self.ppcWorker.onFrameMove.connect(self.mapWorker.setFrameMove)
+        self.ppcWorker.onBufferReady.connect(self.detector.detect)
+        # self.ppcWorker.onFinish.connect(self.setOutput)
 
     def openFile(self):
         file_name = QFileDialog.getOpenFileName(self, "Open Video")[0]
         if os.path.exists(file_name):
             self.mediaPlayer.setMedia(QMediaContent(QUrl.fromLocalFile(file_name)))
             self.cap = cv2.VideoCapture(file_name)
-            length = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            self.frameCount = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
             dialog = ProcessDialog()
-            dialog.setMaximum(length)
-            worker = PreprocessThread(self.cap, self.objectmap)
-            worker.onImageReady.connect(self.detector.detect)
-            worker.onUpdateProgress.connect(dialog.updateProgress)
-            worker.onFinish.connect(self.setOutput)
-            worker.finished.connect(dialog.close)
+            dialog.setMaximum(self.frameCount)
+            self.ppcWorker.set_videoStream(file_name)
+            self.mapWorker.set_videoStream(file_name)
+            self.mapWorker.onUpdateProgress.connect(dialog.updateProgress)
+            self.ppcWorker.onUpdateProgress.connect(dialog.updateProgress)
+            # ppcWorker.finished.connect(dialog.close)
             # dialog.onReady2Read.connect(self.setOutput)
             dialog.show()
-            worker.start()
+            self.mapWorker.start()
+            self.ppcWorker.start()
             # self.ui_dialog = Ui_Dialog()
             # self.ui_dialog.setupUi(dialog)
             dialog.exec_()
@@ -80,18 +86,22 @@ class MainWindow(QMainWindow):
     def saveFile(self):
         worker = VideoWriterThread(self.cap, self.map, 'output.avi')
         dialog = ProcessDialog()
-        length = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        dialog.setMaximum(length)
+        dialog.setMaximum(self.frameCount)
         worker.onUpdateProgress.connect(dialog.updateProgress)
         worker.finished.connect(dialog.close)
         dialog.show()
         worker.start()
         dialog.exec_()
 
-    def setOutput(self):
-        length = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    def updateObject(self, frame_objects):
         duration = self.mediaPlayer.duration()
-        self.videoWidget.setOutput(self.objectmap, duration / length)
+        self.videoWidget.setOutput(frame_objects, duration / self.frameCount)
+        self.ui.playButton.setEnabled(True)
+        self.ui.saveButton.setEnabled(True)
+
+    def setOutput(self):
+        duration = self.mediaPlayer.duration()
+        self.videoWidget.setOutput(self.objectmap, duration / self.frameCount)
 
         # sum = 0
         # for log in logs:

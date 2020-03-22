@@ -1,4 +1,5 @@
 # This Python file uses the following encoding: utf-8
+import enum
 from collections import defaultdict
 
 import cv2
@@ -10,11 +11,16 @@ from Worker import PreprocessThread
 from forms import Ui_processdialog
 
 
+class ProcessName(enum.Enum):
+    Preprocess = 1
+    ObjectMapping = 2
+
+
 class ProcessDialog(QDialog):
 
     def __init__(self):
         super(ProcessDialog, self).__init__()
-        self.ui = loadUi('forms/processdialog.ui',self)
+        self.ui = loadUi('forms/processdialog.ui', self)
         self.ui.buttonBox.rejected.connect(self.close)
         self.setWindowTitle('Processing')
         self.setFixedSize(self.size())
@@ -34,8 +40,12 @@ class ProcessDialog(QDialog):
         self.onReady2Read.emit(map, log)
         self.close()
 
-    def updateProgress(self, value):
-        self.ui.progressBar.setValue(value)
+    def updateProgress(self, value, processname):
+        if processname == 'preprocess':
+            self.ui.progressBar1.setValue(value)
+        if processname == 'objectMapping':
+            self.ui.progressBar2.setValue(value)
 
     def setMaximum(self, value):
-        self.ui.progressBar.setMaximum(value)
+        self.ui.progressBar1.setMaximum(value)
+        self.ui.progressBar2.setMaximum(value)
