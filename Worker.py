@@ -159,7 +159,6 @@ class PreprocessThread(QThread):
         # frame_count = 500
         if not os.path.exists(self.dataFileName):
             d = [(0, 0)]
-            self.onFrameChanged.emit([0, 0])
             tmp = []
             for frameId in range(1, frame_count):
                 # Detect feature points in previous frame
@@ -210,6 +209,7 @@ class PreprocessThread(QThread):
                 prev_gray = curr_gray
                 buffer.append(prev_gray.astype("int16"))
                 self.onUpdateProgress.emit(frameId + 1, 'preprocess')
+            self.onFrameChanged.emit([0, 0])
             if len(buffer) >= step_size:
                 self.onBufferReady.emit(frameId, buffer[-window_size:])
             else:
@@ -218,7 +218,6 @@ class PreprocessThread(QThread):
             np.save(self.dataFileName, d)
         else:
             d = np.load(self.dataFileName)
-            self.onFrameChanged.emit(d[0].tolist())
             tmp = []
             for frameId in range(1, frame_count):
                 # Detect feature points in previous frame
@@ -243,6 +242,7 @@ class PreprocessThread(QThread):
                 curr_gray = cv2.cvtColor(curr, cv2.COLOR_BGR2GRAY)
                 prev_gray = curr_gray
                 self.onUpdateProgress.emit(frameId + 1, 'preprocess')
+            self.onFrameChanged.emit(d[0].tolist())
             if len(buffer) >= step_size:
                 self.onBufferReady.emit(frameId, buffer[-window_size:])
         logger.debug('preprocess finished')
@@ -280,8 +280,9 @@ class ObjectMappingThread(QThread):
         self.stopped_id = None
         self.frame_count = frame_count
         self.fps = fps
-        self.window_size = fps*window_time
-        self.objectmap = defaultdict(lambda: None)
+        self.window_size = fps * window_time
+        self.objectmap = defaultdict(lambda: {'area': None, 'cells': [], 'scores': []})
+        self.last_cells = None
         self.lastFrameId = 0
         self.currFrameId = 0
         self.Q = Queue()
@@ -301,8 +302,33 @@ class ObjectMappingThread(QThread):
         while True:
             # otherwise, ensure the queue has room in it
             if not self.Q.empty():
-                (lastest_id, cellObject, scores) = self.Q.get()
+                (end_id, new_cells, scores) = self.Q.get()
+                new_cells = np.array(new_cells)
+                start_id = int(end_id + 1 - self.window_size)
+                if self.currFrameId < start_id:
+                    # get last cells
+                    last_cells = self.objectmap[self.currFrameId]['cells']
+                    for i in range(self.currFrameId, start_id):
+                        x, y = self.flow_list[i]
+                        if len(last_cells) > 0:
+                            last_cells[:, [0, 2]] = last_cells[:, [0, 2]] + x
+                            last_cells[:, [1, 3]] = last_cells[:, [1, 3]] + y
+                        self.objectmap[i + 1] = {'area': None, 'cells': np.copy(last_cells), 'scores': scores}
+                        self.currFrameId += 1
+                        self.onUpdateProgress.emit(i + 1, 'objectMapping')
 
+                last_cells = self.objectmap[self.currFrameId]["cells"]
+                # new and last conflict
+                self.objectmap[self.currFrameId] = {'area': None, 'cells': np.copy(new_cells), 'scores': scores}
+                for i in range(self.currFrameId, end_id):
+                    x, y = self.flow_list[i]
+                    if len(new_cells) > 0:
+                        new_cells[:, [0, 2]] = new_cells[:, [0, 2]] + x
+                        new_cells[:, [1, 3]] = new_cells[:, [1, 3]] + y
+                    self.objectmap[i+1] = {'area': None, 'cells': np.copy(new_cells), 'scores': scores}
+                    self.currFrameId += 1
+                    self.onUpdateProgress.emit(i + 1, 'objectMapping')
+                self.onUpdateObject.emit(self.objectmap)
                 # if
                 # dx = ds[0] - ds[0, 0]
                 # dy = ds[1] - ds[1, 0]
@@ -332,9 +358,9 @@ class ObjectMappingThread(QThread):
                 #         self.currentFrameId = frameIds[-1]
                 #         self.onUpdateObject.emit(self.objectmap)
                 #
-                logger.debug("progress {}/{} : cell{} - scores{}".format(lastest_id, self.stopped_id, str(cellObject),
+                logger.debug("progress {}/{} : cell{} - scores{}".format(end_id, self.stopped_id, str(new_cells),
                                                                          str(scores)))
-                self.onUpdateProgress.emit(lastest_id + 1, 'objectMapping')
-                if lastest_id == self.frame_count-1:
+                self.onUpdateProgress.emit(end_id + 1, 'objectMapping')
+                if end_id == self.frame_count - 1:
                     self.sleep(1)
                     return
