@@ -86,13 +86,16 @@ def find_inactive(bin_signal):
     return np.array(gaps)
 
 
+window_time = 2
+
+
 class PreprocessThread(QThread):
     onImageReady = QtCore.pyqtSignal(list, list, list, np.ndarray)
     # onBufferReady = QtCore.pyqtSignal(list, np.ndarray, list)
     onBufferReady = QtCore.pyqtSignal(int, list)
     onFinish = QtCore.pyqtSignal()
     onUpdateProgress = QtCore.pyqtSignal(int, str)
-    onFrameChanged = QtCore.pyqtSignal(np.ndarray)
+    onFrameChanged = QtCore.pyqtSignal(list)
 
     def __init__(self, file_name):
         QThread.__init__(self)
@@ -144,7 +147,7 @@ class PreprocessThread(QThread):
         logger.info('start preprocess video')
         frame_count = int(self.fvs.stream.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = np.ceil(self.fvs.stream.get(cv2.CAP_PROP_FPS))
-        window_size = int(fps * 2)
+        window_size = int(fps * window_time)
         step_size = int(fps)
         move_thres = 0.5
         buffer = []
@@ -156,6 +159,8 @@ class PreprocessThread(QThread):
         # frame_count = 500
         if not os.path.exists(self.dataFileName):
             d = [(0, 0)]
+            self.onFrameChanged.emit([0, 0])
+            tmp = []
             for frameId in range(1, frame_count):
                 # Detect feature points in previous frame
                 prev_pts = cv2.goodFeaturesToTrack(prev_gray,
@@ -182,14 +187,22 @@ class PreprocessThread(QThread):
                 dx = H[0, 2]
                 dy = H[1, 2]
                 d.append([dx, dy])
+                self.onFrameChanged.emit([dx, dy])
                 if dx < move_thres and dy < move_thres:
                     buffer.append(prev_gray.astype("int16"))
                     if len(buffer) == window_size:
                         # send buffer to predict
+                        self.onBufferReady.emit(frameId, buffer[-window_size:])
                         # step buffer
+                        tmp = buffer[:step_size]
                         buffer = buffer[step_size:]
                 else:
+                    tmp.extend(buffer)
+                    if len(tmp) >= window_size:
+                        self.onBufferReady.emit(frameId - 1, buffer[-window_size:])
+                    self.onBufferReady.emit(frameId, [])
                     # clear buffer
+                    tmp = []
                     buffer = []
                 # Extract rotation angle
                 # da = np.arctan2(H[1, 0], H[0, 0])
@@ -197,30 +210,41 @@ class PreprocessThread(QThread):
                 prev_gray = curr_gray
                 buffer.append(prev_gray.astype("int16"))
                 self.onUpdateProgress.emit(frameId + 1, 'preprocess')
-
+            if len(buffer) >= step_size:
+                self.onBufferReady.emit(frameId, buffer[-window_size:])
+            else:
+                self.onBufferReady.emit(frameId, None)
             d = np.array(d)
             np.save(self.dataFileName, d)
         else:
             d = np.load(self.dataFileName)
-            frame_ids = list(range(1, frame_count))
-            for frameId, (dx, dy) in zip(frame_ids, d):
+            self.onFrameChanged.emit(d[0].tolist())
+            tmp = []
+            for frameId in range(1, frame_count):
                 # Detect feature points in previous frame
+                (dx, dy) = d[frameId]
                 curr = self.fvs.read()
+                self.onFrameChanged.emit([dx, dy])
                 if dx < move_thres and dy < move_thres:
                     buffer.append(prev_gray.astype("int16"))
-                    if len(buffer) == window_size+1:
+                    if len(buffer) == window_size:
                         # send buffer to predict
-                        # self.onBufferReady.emit(frameId, buffer[-window_size:])
+                        self.onBufferReady.emit(frameId, buffer[-window_size:])
                         # step buffer
-                        buffer.pop(0)
+                        tmp = buffer[:step_size]
+                        buffer = buffer[step_size:]
                 else:
-                    # if len(buffer) >= window_size:
-                    #     self.onBufferReady(frameId, buffer[-window_size:])
+                    tmp.extend(buffer)
+                    if len(tmp) >= window_size:
+                        self.onBufferReady.emit(frameId - 1, buffer[-window_size:])
                     # clear buffer
+                    tmp = []
                     buffer = []
                 curr_gray = cv2.cvtColor(curr, cv2.COLOR_BGR2GRAY)
                 prev_gray = curr_gray
-                self.onUpdateProgress.emit(frameId+1, 'preprocess')
+                self.onUpdateProgress.emit(frameId + 1, 'preprocess')
+            if len(buffer) >= step_size:
+                self.onBufferReady.emit(frameId, buffer[-window_size:])
         logger.debug('preprocess finished')
         # self.onFrameChanged.emit(d)
         # kernelSize = int(fps * 2)
@@ -251,60 +275,66 @@ class ObjectMappingThread(QThread):
     onUpdateProgress = QtCore.pyqtSignal(int, str)
     onUpdateObject = QtCore.pyqtSignal(defaultdict)
 
-    def __init__(self):
+    def __init__(self, frame_count, fps):
         QThread.__init__(self)
+        self.stopped_id = None
+        self.frame_count = frame_count
+        self.fps = fps
+        self.window_size = fps*window_time
         self.objectmap = defaultdict(lambda: None)
-        self.stopped = False
         self.lastFrameId = 0
-        self.currentFrameId = 0
+        self.currFrameId = 0
         self.Q = Queue()
+        self.flow_list = []
 
     def __del__(self):
         self.wait()
 
-    def setFrameMove(self, ds):
-        self.ds = ds
+    def updateOpticalFlow(self, d):
+        self.flow_list.append(d)
 
-    def queueCellObjects(self, *args):
-        # self.Q.put(args)
-        logger.debug('{}-{} : queue success'.format(args[0],args[0]-50))
+    def queueOutput(self, *args):
+        self.Q.put(args)
+        logger.debug('{}-{} : queue success'.format(args[0], args[0] - 50))
 
     def run(self):
         while True:
-            # if the thread indicator variable is set, stop the
-            # thread
-            if self.stopped:
-                return
             # otherwise, ensure the queue has room in it
             if not self.Q.empty():
-                (frameIds, ds, cellObject, scores) = self.Q.get()
-                dx = ds[0] - ds[0, 0]
-                dy = ds[1] - ds[1, 0]
-                cellObject = np.array(cellObject)
-                if self.currentFrameId in frameIds:
-                    if len(cellObject) > 0:
-                        for fId, x, y in zip(frameIds, dx, dy):
-                            cellObject[:, [0, 2]] = cellObject[:, [0, 2]] + x
-                            cellObject[:, [1, 3]] = cellObject[:, [1, 3]] + y
-                            self.objectmap[fId] = {'area': None, 'cells': np.copy(cellObject), 'scores': scores}
-                    self.lastFrameId = self.currentFrameId
-                    self.lastCellObject = cellObject
-                    self.currentFrameId = frameIds[-1]
-                    self.onUpdateObject.emit(self.objectmap)
-                else:
-                    if len(self.lastCellObject) > 0:
-                        last_frameIds = list(range(self.lastFrameId, frameIds[0]))
-                        last_dx = self.ds[0, last_frameIds] - self.ds[0, last_frameIds][0]
-                        last_dy = self.ds[1, last_frameIds] - self.ds[1, last_frameIds][0]
-                        last_cells = self.objectmap[self.lastFrameId]['cells']
-                        for fId, x, y in zip(last_frameIds, last_dx, last_dy):
-                            last_cells[:, [0, 2]] = last_cells[:, [0, 2]] + x
-                            last_cells[:, [1, 3]] = last_cells[:, [1, 3]] + y
-                            self.objectmap[fId] = {'area': None, 'cells': np.copy(last_cells), 'scores': scores}
-                        self.lastFrameId = self.currentFrameId
-                        self.lastCellObject = last_cells
-                        self.currentFrameId = frameIds[-1]
-                        self.onUpdateObject.emit(self.objectmap)
+                (lastest_id, cellObject, scores) = self.Q.get()
 
-                logger.debug("lid {} - cell{} - scores{}".format(frameIds[-1], str(cellObject), str(scores)))
-                self.onUpdateProgress.emit(frameIds[-1], 'objectMapping')
+                # if
+                # dx = ds[0] - ds[0, 0]
+                # dy = ds[1] - ds[1, 0]
+                # cellObject = np.array(cellObject)
+                # if self.currentFrameId in frameIds:
+                #     if len(cellObject) > 0:
+                #         for fId, x, y in zip(frameIds, dx, dy):
+                #             cellObject[:, [0, 2]] = cellObject[:, [0, 2]] + x
+                #             cellObject[:, [1, 3]] = cellObject[:, [1, 3]] + y
+                #             self.objectmap[fId] = {'area': None, 'cells': np.copy(cellObject), 'scores': scores}
+                #     self.lastFrameId = self.currentFrameId
+                #     self.lastCellObject = cellObject
+                #     self.currentFrameId = frameIds[-1]
+                #     self.onUpdateObject.emit(self.objectmap)
+                # else:
+                #     if len(self.lastCellObject) > 0:
+                #         last_frameIds = list(range(self.lastFrameId, frameIds[0]))
+                #         last_dx = self.ds[0, last_frameIds] - self.ds[0, last_frameIds][0]
+                #         last_dy = self.ds[1, last_frameIds] - self.ds[1, last_frameIds][0]
+                #         last_cells = self.objectmap[self.lastFrameId]['cells']
+                #         for fId, x, y in zip(last_frameIds, last_dx, last_dy):
+                #             last_cells[:, [0, 2]] = last_cells[:, [0, 2]] + x
+                #             last_cells[:, [1, 3]] = last_cells[:, [1, 3]] + y
+                #             self.objectmap[fId] = {'area': None, 'cells': np.copy(last_cells), 'scores': scores}
+                #         self.lastFrameId = self.currentFrameId
+                #         self.lastCellObject = last_cells
+                #         self.currentFrameId = frameIds[-1]
+                #         self.onUpdateObject.emit(self.objectmap)
+                #
+                logger.debug("progress {}/{} : cell{} - scores{}".format(lastest_id, self.stopped_id, str(cellObject),
+                                                                         str(scores)))
+                self.onUpdateProgress.emit(lastest_id + 1, 'objectMapping')
+                if lastest_id == self.frame_count-1:
+                    self.sleep(1)
+                    return

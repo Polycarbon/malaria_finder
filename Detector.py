@@ -57,7 +57,3 @@ class CellDetector(QObject):
                 cells.append(tuple(cell))
                 sc.append(score)
         self.onDetectSuccess.emit(cur_frame_id, cells, sc)
-        # for key in key_list:
-        #     self.objectmap[key]['cells'] = cells
-        #
-        # logger.info('cell location : {}'.format(str(cells)))

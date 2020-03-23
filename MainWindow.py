@@ -17,7 +17,7 @@ from ProcessDialog import ProcessDialog
 from VideoWidget import VideoWidget
 from Worker import PreprocessThread, VideoWriterThread, ObjectMappingThread
 from forms.Ui_mainwindow import Ui_MainWindow
-
+import numpy as np
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -62,18 +62,21 @@ class MainWindow(QMainWindow):
             self.mediaPlayer.setMedia(QMediaContent(QUrl.fromLocalFile(file_name)))
             self.cap = cv2.VideoCapture(file_name)
             self.frameCount = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            fps = np.ceil(self.cap.get(cv2.CAP_PROP_FPS))
+            window_time = 2  # sec
             dialog = ProcessDialog(self)
             dialog.setMaximum(self.frameCount)
-            map_worker = ObjectMappingThread()
+            map_worker = ObjectMappingThread(self.frameCount, fps)
             map_worker.onUpdateObject.connect(self.updateObject)
             map_worker.onUpdateProgress.connect(dialog.updateProgress)
             ppc_worker = PreprocessThread(file_name)
-            ppc_worker.onFrameChanged.connect(map_worker.setFrameMove)
+            ppc_worker.onFrameChanged.connect(map_worker.updateOpticalFlow)
             ppc_worker.onBufferReady.connect(self.detector.detect)
             ppc_worker.onUpdateProgress.connect(dialog.updateProgress)
-            dialog.closed.connect(ppc_worker.terminate)
-            dialog.closed.connect(map_worker.terminate)
-            self.detector.onDetectSuccess.connect(map_worker.queueCellObjects)
+            map_worker.finished.connect(dialog.close)
+            dialog.closed.connect(ppc_worker.quit)
+            dialog.closed.connect(map_worker.quit)
+            self.detector.onDetectSuccess.connect(map_worker.queueOutput)
             # ppc_worker.finished.connect(dialog.close)
             # dialog.onReady2Read.connect(self.setOutput)
             dialog.show()
