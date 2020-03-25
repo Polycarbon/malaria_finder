@@ -105,21 +105,14 @@ class VideoWidgetSurface(QAbstractVideoSurface):
             self.i+=1
             frame_id = int(self.parent.mediaPlayer.position()/self.t_const)
             painter.drawImage(self.targetRect, image, self.sourceRect)
-            bnd = self.output[frame_id]
-            if bnd:
-                #draw bound
-                # top, left, bottom, right = bnd['area'].bbox
-                # area_box = QRect(QPoint(left,top), QPoint(right,bottom))
-                # scale_box = self.translatedAndScaled(area_box)
-                # painter.setBrush(Qt.NoBrush)
-                # painter.setPen(Qt.blue)
-                # painter.drawRect(scale_box)
-                for cell_box in bnd['cells']:
-                    # top, left, bottom, right = cell.bbox
-                    cell_box = self.translatedAndScaled(cell_box)
-                    painter.setBrush(Qt.NoBrush)
-                    painter.setPen(Qt.green)
-                    painter.drawRect(cell_box)
+            objects = self.output[frame_id]['cells']
+            for o_id, cell_box in objects.items():
+                # top, left, bottom, right = cell.bbox
+                cell_box = self.translatedAndScaled(cell_box)
+                painter.setBrush(Qt.NoBrush)
+                painter.setPen(Qt.green)
+                painter.drawRect(cell_box)
+                painter.drawText(cell_box.bottomRight(), "id {}".format(o_id))
 
             painter.setTransform(oldTransform)
 

@@ -8,6 +8,7 @@ from PyQt5.QtCore import QThread, QRect, QRectF, QPointF
 from PyQt5 import QtCore
 from PyQt5.QtWidgets import QApplication
 import numpy as np
+from scipy.spatial.distance import cdist
 
 from centroidtracker import CentroidTracker
 from keras_retinanet import models
@@ -18,7 +19,7 @@ from skimage.measure import label, regionprops
 from skimage.morphology import dilation, square
 from scipy import stats
 import matplotlib.pyplot as plt
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from imutils.video import FileVideoStream
 from keras_retinanet.utils.image import preprocess_image, resize_image
 
@@ -275,7 +276,7 @@ class PreprocessThread(QThread):
 class ObjectMappingThread(QThread):
     onUpdateProgress = QtCore.pyqtSignal(int, str)
     onUpdateObject = QtCore.pyqtSignal(defaultdict)
-    onNewDetectedCells = QtCore.pyqtSignal(int,int)
+    onNewDetectedCells = QtCore.pyqtSignal(int, int)
 
     def __init__(self, frame_count, fps):
         QThread.__init__(self)
@@ -285,6 +286,9 @@ class ObjectMappingThread(QThread):
         self.window_size = fps * window_time
         self.objectmap = defaultdict(lambda: {'area': None, 'cells': [], 'scores': []})
         self.last_cells = None
+        self.objects = OrderedDict()
+        self.disappeared = OrderedDict()
+        self.nextObjectID = 0
         self.lastFrameId = 0
         self.currFrameId = 0
         self.Q = Queue()
@@ -302,33 +306,95 @@ class ObjectMappingThread(QThread):
         self.Q.put(args)
         logger.debug('{}-{} : queue success'.format(args[0], args[0] - 50))
 
-    def not_tracked(self, last_detected, detected):
-        if len(detected) == 0:
-            return last_detected, []  # No new classified objects to search for
-        if len(last_detected) == 0:
-            return [], detected  # No existing boxes, return all objects
+    def register(self, object):
+        # when registering an object we use the next available object
+        # ID to store the centroid
+        self.objects[self.nextObjectID] = object
+        self.disappeared[self.nextObjectID] = 0
+        self.nextObjectID += 1
 
-        new_objects = []
-        updated_objects = []
-        obj: QRectF
-        for obj in detected:
-            obj.center()
-            dist = [(o.center()-obj.center()).manhattanLength() for o in last_detected]
-            closed_dist = max(dist)
-            box_range = (obj.topLeft()-obj.bottomRight()).manhattanLength()/2
-            if closed_dist < box_range:
-                updated_objects.append(detected[dist.index(closed_dist)])
-            else:
-                new_objects.append(obj)
-        return updated_objects, new_objects
+    def deregister(self, objectID):
+        # to deregister an object ID we delete the object ID from
+        # both of our respective dictionaries
+        del self.objects[objectID]
+        del self.disappeared[objectID]
 
-    def trackObject(self, rects, start_id, end_id):
-        centroid_idx = self.tracker.update(rects)
+    def updateObject(self, rects):
+        # check to see if the list of input bounding box rectangles
+        # is empty
+        new_object = 0
+        if len(rects) == 0:
+            # loop over any existing tracked objects and mark them
+            # as disappeared
+            for object_id in list(self.disappeared.keys()):
+                self.disappeared[object_id] += 1
+
+                # if we have reached a maximum number of consecutive
+                # frames where a given object has been marked as
+                # missing, deregister it
+                # if self.disappeared[object_id] > self.maxDisappeared:
+                #     self.deregister(object_id)
+
+            # return early as there are no centroids or tracking info
+            # to update
+            return 0
+
+        # if we are currently not tracking any objects take the input
+        # centroids and register each of them
+        if len(self.objects) == 0:
+            new_object += len(rects)
+            for i in range(0, len(rects)):
+                self.register(rects[i])
+
+        # otherwise, are are currently tracking objects so we need to
+        # try to match the input centroids to existing object
+        # centroids
+        else:
+            # initialize an array of input centroids for the current frame
+            input_centroids = np.array([(o.center().x(), o.center().y()) for o in rects])
+            # grab the set of object IDs and corresponding centroids
+            object_ids = list(self.objects.keys())
+            object_centroids = np.array([(o.center().x(), o.center().y()) for o in self.objects.values()])
+            d = cdist(object_centroids, input_centroids)
+            rows = d.min(axis=1).argsort()
+            cols = d.argmin(axis=1)[rows]
+            used_rows = set()
+            used_cols = set()
+            for (row, col) in zip(rows, cols):
+                if row in used_rows or col in used_cols:
+                    continue
+                object_id = object_ids[row]
+                obj = self.objects[object_id]
+                print(d[row, col])
+                if d[row, col] < 80:
+                    self.objects[object_id] = rects[col]
+                    self.disappeared[object_id] = 0
+                    used_rows.add(row)
+                    used_cols.add(col)
+            unused_rows = set(range(0, d.shape[0])).difference(used_rows)
+            unused_cols = set(range(0, d.shape[1])).difference(used_cols)
+            # if d.shape[0] >= d.shape[1]:
+            # for row in unused_rows:
+            #     object_id = object_ids[row]
+            #     self.disappeared[object_id] += 1
+            #     if self.disappeared[object_id] > self.maxDisappeared:
+            #         self.deregister(object_id)
+            # else:
+            new_object += len(unused_cols)
+            for col in unused_cols:
+                print(rects[col])
+                self.register(rects[col])
+
+        # return the set of trackable objects
+        return new_object
+
+    def translateObjects(self, start_id, end_id):
+        # centroid_idx = self.tracker.update(rects)
         for i in range(start_id, end_id):
             x, y = self.flow_list[i]
-            translated = [cell.translated(x, y) for cell in rects]
+            translated = OrderedDict([(k, cell.translated(x, y)) for k, cell in self.objects.items()])
             self.objectmap[i + 1] = {'area': None, 'cells': translated, 'scores': []}
-            rects = translated
+            self.objects.update(translated)
             self.onUpdateProgress.emit(i + 1, 'objectMapping')
         self.currFrameId = end_id
         self.onUpdateObject.emit(self.objectmap)
@@ -342,21 +408,18 @@ class ObjectMappingThread(QThread):
                 start_id = int(end_id + 1 - self.window_size)
                 if self.currFrameId < start_id:
                     # get last cells
-                    last_cells = self.objectmap[self.currFrameId]['cells']
-                    self.trackObject(last_cells, self.currFrameId, start_id)
+                    # last_cells = self.objectmap[self.currFrameId]['cells']
+                    self.translateObjects(self.currFrameId, start_id)
 
-                last_cells = self.objectmap[self.currFrameId]["cells"]
-                updated_cells, new_cells = self.not_tracked(last_cells, detected_cells)
-                if len(new_cells) > 0:
-                    print(new_cells)
-                    self.onNewDetectedCells.emit(self.currFrameId, len(new_cells))
-
-                updated_cells = updated_cells+new_cells
+                # last_cells = self.objectmap[self.currFrameId]["cells"]
+                new_count = self.updateObject(detected_cells)
+                if new_count > 0:
+                    self.onNewDetectedCells.emit(self.currFrameId, new_count)
                 # new and last conflict
-                self.objectmap[self.currFrameId] = {'area': None, 'cells': updated_cells, 'scores': scores}
-                self.trackObject(updated_cells, self.currFrameId, end_id)
+                self.objectmap[self.currFrameId] = {'area': None, 'cells': self.objects.copy(), 'scores': scores}
+                self.translateObjects(self.currFrameId, end_id)
 
-                logger.debug("progress {}/{} : cell{} - scores{}".format(end_id, self.stopped_id, str(detected_cells),
+                logger.debug("progress {}/{} : cell{} - scores{}".format(end_id, self.frame_count, str(detected_cells),
                                                                          str(scores)))
                 if end_id == self.frame_count - 1:
                     self.sleep(1)
