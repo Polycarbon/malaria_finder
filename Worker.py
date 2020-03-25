@@ -4,11 +4,12 @@ import os
 from queue import Queue
 
 import cv2
-from PyQt5.QtCore import QThread
+from PyQt5.QtCore import QThread, QRect, QRectF, QPointF
 from PyQt5 import QtCore
 from PyQt5.QtWidgets import QApplication
 import numpy as np
 
+from centroidtracker import CentroidTracker
 from keras_retinanet import models
 from scipy.ndimage import binary_closing
 from scipy.spatial import distance
@@ -274,6 +275,7 @@ class PreprocessThread(QThread):
 class ObjectMappingThread(QThread):
     onUpdateProgress = QtCore.pyqtSignal(int, str)
     onUpdateObject = QtCore.pyqtSignal(defaultdict)
+    onNewDetectedCells = QtCore.pyqtSignal(int,int)
 
     def __init__(self, frame_count, fps):
         QThread.__init__(self)
@@ -286,7 +288,9 @@ class ObjectMappingThread(QThread):
         self.lastFrameId = 0
         self.currFrameId = 0
         self.Q = Queue()
+        self.tracker = CentroidTracker()
         self.flow_list = []
+        self.objectId = 0
 
     def __del__(self):
         self.wait()
@@ -298,69 +302,62 @@ class ObjectMappingThread(QThread):
         self.Q.put(args)
         logger.debug('{}-{} : queue success'.format(args[0], args[0] - 50))
 
+    def not_tracked(self, last_detected, detected):
+        if len(detected) == 0:
+            return last_detected, []  # No new classified objects to search for
+        if len(last_detected) == 0:
+            return [], detected  # No existing boxes, return all objects
+
+        new_objects = []
+        updated_objects = []
+        obj: QRectF
+        for obj in detected:
+            obj.center()
+            dist = [(o.center()-obj.center()).manhattanLength() for o in last_detected]
+            closed_dist = max(dist)
+            box_range = (obj.topLeft()-obj.bottomRight()).manhattanLength()/2
+            if closed_dist < box_range:
+                updated_objects.append(detected[dist.index(closed_dist)])
+            else:
+                new_objects.append(obj)
+        return updated_objects, new_objects
+
+    def trackObject(self, rects, start_id, end_id):
+        centroid_idx = self.tracker.update(rects)
+        for i in range(start_id, end_id):
+            x, y = self.flow_list[i]
+            translated = [cell.translated(x, y) for cell in rects]
+            self.objectmap[i + 1] = {'area': None, 'cells': translated, 'scores': []}
+            rects = translated
+            self.onUpdateProgress.emit(i + 1, 'objectMapping')
+        self.currFrameId = end_id
+        self.onUpdateObject.emit(self.objectmap)
+
     def run(self):
         while True:
             # otherwise, ensure the queue has room in it
             if not self.Q.empty():
-                (end_id, new_cells, scores) = self.Q.get()
-                new_cells = np.array(new_cells)
+                (end_id, detected_cells, scores) = self.Q.get()
+                detected_cells = [QRectF(*cell) for cell in detected_cells]
                 start_id = int(end_id + 1 - self.window_size)
                 if self.currFrameId < start_id:
                     # get last cells
                     last_cells = self.objectmap[self.currFrameId]['cells']
-                    for i in range(self.currFrameId, start_id):
-                        x, y = self.flow_list[i]
-                        if len(last_cells) > 0:
-                            last_cells[:, [0, 2]] = last_cells[:, [0, 2]] + x
-                            last_cells[:, [1, 3]] = last_cells[:, [1, 3]] + y
-                        self.objectmap[i + 1] = {'area': None, 'cells': np.copy(last_cells), 'scores': scores}
-                        self.currFrameId += 1
-                        self.onUpdateProgress.emit(i + 1, 'objectMapping')
+                    self.trackObject(last_cells, self.currFrameId, start_id)
 
                 last_cells = self.objectmap[self.currFrameId]["cells"]
+                updated_cells, new_cells = self.not_tracked(last_cells, detected_cells)
+                if len(new_cells) > 0:
+                    print(new_cells)
+                    self.onNewDetectedCells.emit(self.currFrameId, len(new_cells))
+
+                updated_cells = updated_cells+new_cells
                 # new and last conflict
-                self.objectmap[self.currFrameId] = {'area': None, 'cells': np.copy(new_cells), 'scores': scores}
-                for i in range(self.currFrameId, end_id):
-                    x, y = self.flow_list[i]
-                    if len(new_cells) > 0:
-                        new_cells[:, [0, 2]] = new_cells[:, [0, 2]] + x
-                        new_cells[:, [1, 3]] = new_cells[:, [1, 3]] + y
-                    self.objectmap[i+1] = {'area': None, 'cells': np.copy(new_cells), 'scores': scores}
-                    self.currFrameId += 1
-                    self.onUpdateProgress.emit(i + 1, 'objectMapping')
-                self.onUpdateObject.emit(self.objectmap)
-                # if
-                # dx = ds[0] - ds[0, 0]
-                # dy = ds[1] - ds[1, 0]
-                # cellObject = np.array(cellObject)
-                # if self.currentFrameId in frameIds:
-                #     if len(cellObject) > 0:
-                #         for fId, x, y in zip(frameIds, dx, dy):
-                #             cellObject[:, [0, 2]] = cellObject[:, [0, 2]] + x
-                #             cellObject[:, [1, 3]] = cellObject[:, [1, 3]] + y
-                #             self.objectmap[fId] = {'area': None, 'cells': np.copy(cellObject), 'scores': scores}
-                #     self.lastFrameId = self.currentFrameId
-                #     self.lastCellObject = cellObject
-                #     self.currentFrameId = frameIds[-1]
-                #     self.onUpdateObject.emit(self.objectmap)
-                # else:
-                #     if len(self.lastCellObject) > 0:
-                #         last_frameIds = list(range(self.lastFrameId, frameIds[0]))
-                #         last_dx = self.ds[0, last_frameIds] - self.ds[0, last_frameIds][0]
-                #         last_dy = self.ds[1, last_frameIds] - self.ds[1, last_frameIds][0]
-                #         last_cells = self.objectmap[self.lastFrameId]['cells']
-                #         for fId, x, y in zip(last_frameIds, last_dx, last_dy):
-                #             last_cells[:, [0, 2]] = last_cells[:, [0, 2]] + x
-                #             last_cells[:, [1, 3]] = last_cells[:, [1, 3]] + y
-                #             self.objectmap[fId] = {'area': None, 'cells': np.copy(last_cells), 'scores': scores}
-                #         self.lastFrameId = self.currentFrameId
-                #         self.lastCellObject = last_cells
-                #         self.currentFrameId = frameIds[-1]
-                #         self.onUpdateObject.emit(self.objectmap)
-                #
-                logger.debug("progress {}/{} : cell{} - scores{}".format(end_id, self.stopped_id, str(new_cells),
+                self.objectmap[self.currFrameId] = {'area': None, 'cells': updated_cells, 'scores': scores}
+                self.trackObject(updated_cells, self.currFrameId, end_id)
+
+                logger.debug("progress {}/{} : cell{} - scores{}".format(end_id, self.stopped_id, str(detected_cells),
                                                                          str(scores)))
-                self.onUpdateProgress.emit(end_id + 1, 'objectMapping')
                 if end_id == self.frame_count - 1:
                     self.sleep(1)
                     return

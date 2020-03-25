@@ -1,5 +1,5 @@
 
-from PyQt5.QtCore import QRect, QPoint, Qt
+from PyQt5.QtCore import QRect, QPoint, Qt, QRectF, QPointF
 from PyQt5.QtGui import QImage, QPalette, QPainter, QRegion
 from PyQt5.QtMultimedia import QAbstractVideoSurface, QAbstractVideoBuffer, QVideoFrame, QVideoSurfaceFormat
 from PyQt5.QtWidgets import QWidget, QSizePolicy
@@ -82,8 +82,8 @@ class VideoWidgetSurface(QAbstractVideoSurface):
 
     def translatedAndScaled(self,rect):
         topLeft = (rect.topLeft()*self.ratio) + self.refPoint
-        bottomRight = (rect.bottomRight()*self.ratio)+ self.refPoint
-        return QRect(topLeft,bottomRight)
+        bottomRight = (rect.bottomRight()*self.ratio) + self.refPoint
+        return QRectF(topLeft,bottomRight)
 
     def paint(self, painter):
         try:
@@ -114,10 +114,8 @@ class VideoWidgetSurface(QAbstractVideoSurface):
                 # painter.setBrush(Qt.NoBrush)
                 # painter.setPen(Qt.blue)
                 # painter.drawRect(scale_box)
-                for cell in bnd['cells']:
+                for cell_box in bnd['cells']:
                     # top, left, bottom, right = cell.bbox
-                    left, top, right, bottom = cell
-                    cell_box = QRect(QPoint(left, top), QPoint(right, bottom))
                     cell_box = self.translatedAndScaled(cell_box)
                     painter.setBrush(Qt.NoBrush)
                     painter.setPen(Qt.green)

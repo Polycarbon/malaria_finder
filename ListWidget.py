@@ -36,9 +36,7 @@ class QCustomQWidget(QWidget):
     def setCount(self, count):
         self.cellNumber.display(count)
 
-    def setTimeText(self, fram_id):
-        ms = fram_id * 33
-
+    def setTimeText(self, ms):
         d = datetime.timedelta(milliseconds=int(ms))
         if d.seconds > 0:
             self.textUpQLabel.setText(str(d).split('.')[0])

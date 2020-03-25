@@ -19,6 +19,7 @@ from Worker import PreprocessThread, VideoWriterThread, ObjectMappingThread
 from forms.Ui_mainwindow import Ui_MainWindow
 import numpy as np
 
+
 class MainWindow(QMainWindow):
     def __init__(self):
         QMainWindow.__init__(self)
@@ -44,6 +45,7 @@ class MainWindow(QMainWindow):
         self.mediaPlayer.stateChanged.connect(self.mediaStateChanged)
         self.mediaPlayer.positionChanged.connect(self.positionChanged)
         self.mediaPlayer.durationChanged.connect(self.durationChanged)
+        self.mediaPlayer.videoAvailableChanged.connect(self.clearDetectLog)
         # s_max = self.maximumSize()
         # # self.ui.statusBar.setSizeGripEnabled(False)
         # self.show()
@@ -59,20 +61,22 @@ class MainWindow(QMainWindow):
     def openFile(self):
         file_name = QFileDialog.getOpenFileName(self, "Open Video")[0]
         if os.path.exists(file_name):
+            self.sum_cells = 0
             self.mediaPlayer.setMedia(QMediaContent(QUrl.fromLocalFile(file_name)))
             self.cap = cv2.VideoCapture(file_name)
             self.frameCount = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            fps = np.ceil(self.cap.get(cv2.CAP_PROP_FPS))
+            self.fps = np.ceil(self.cap.get(cv2.CAP_PROP_FPS))
             window_time = 2  # sec
             dialog = ProcessDialog(self)
             dialog.setMaximum(self.frameCount)
-            map_worker = ObjectMappingThread(self.frameCount, fps)
+            map_worker = ObjectMappingThread(self.frameCount, self.fps)
             map_worker.onUpdateObject.connect(self.updateObject)
             map_worker.onUpdateProgress.connect(dialog.updateProgress)
             ppc_worker = PreprocessThread(file_name)
             ppc_worker.onFrameChanged.connect(map_worker.updateOpticalFlow)
             ppc_worker.onBufferReady.connect(self.detector.detect)
             ppc_worker.onUpdateProgress.connect(dialog.updateProgress)
+            map_worker.onNewDetectedCells.connect(self.updateDetectLog)
             map_worker.finished.connect(dialog.close)
             dialog.closed.connect(ppc_worker.quit)
             dialog.closed.connect(map_worker.quit)
@@ -102,10 +106,19 @@ class MainWindow(QMainWindow):
         self.ui.playButton.setEnabled(True)
         self.ui.saveButton.setEnabled(True)
 
-    def setOutput(self):
-        duration = self.mediaPlayer.duration()
-        self.videoWidget.setOutput(self.objectmap, duration / self.frameCount)
+    def clearDetectLog(self):
+        self.ui.listWidget
 
+    def updateDetectLog(self, detected_frame_id, cell_count):
+        myQCustomQWidget = QCustomQWidget()
+        self.sum_cells += cell_count
+        myQCustomQWidget.setCount(cell_count)
+        myQCustomQWidget.setTimeText(self.fps * detected_frame_id)
+        myQListWidgetItem = QListWidgetItem(self.ui.listWidget)
+        myQListWidgetItem.setSizeHint(myQCustomQWidget.sizeHint())
+        self.ui.listWidget.addItem(myQListWidgetItem)
+        self.ui.listWidget.setItemWidget(myQListWidgetItem, myQCustomQWidget)
+        self.ui.totalNumber.display(self.sum_cells)
         # sum = 0
         # for log in logs:
         #     # Create QCustomQWidget

@@ -80,7 +80,7 @@ logger.setLevel(logging.DEBUG)
 if __name__ == "__main__":
     app = QApplication([])
     window = MainWindow()
-    # window.setStyleSheet(styleData)
+    window.setStyleSheet(styleData)
     window.setFixedSize(window.size())
     window.show()
     sys.exit(app.exec_())

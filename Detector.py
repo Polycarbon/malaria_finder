@@ -7,6 +7,7 @@ from keras_retinanet import models
 from keras_retinanet.utils.gpu import setup_gpu
 from keras_retinanet.utils.image import resize_image, preprocess_image
 import matplotlib.pyplot as plt
+
 logger = logging.getLogger('data flow')
 
 
@@ -28,14 +29,14 @@ class CellDetector(QObject):
         self.onInitModelSuccess.emit()
         logger.info('Init Model Success')
 
-    def setObjectMap(self,objectmap):
+    def setObjectMap(self, objectmap):
         self.objectmap = objectmap
 
     def detect(self, cur_frame_id, buffer):
         logger.info('Detecting Image')
         v_max = 11
         v_min = 2
-        #preprocess
+        # preprocess
         frameDiff = np.abs(np.diff(buffer, axis=0))
         frameDiffSum = np.sum(frameDiff, axis=0)
         av = (frameDiffSum / len(frameDiff))
@@ -54,6 +55,8 @@ class CellDetector(QObject):
         sc = []
         for cell, score in zip(boxes[0], scores[0]):
             if score > 0.5:
-                cells.append(tuple(cell))
+                l, t, r, b = cell
+                cells.append((l, t, r - l, b - t))
+                # cells.append(cell)
                 sc.append(score)
         self.onDetectSuccess.emit(cur_frame_id, cells, sc)
