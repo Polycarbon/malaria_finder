@@ -1,23 +1,24 @@
 # This Python file uses the following encoding: utf-8
 import os
-from collections import defaultdict
 
 import cv2
-from PyQt5 import QtCore
+import imutils
+import numpy as np
 from PyQt5.QtCore import QUrl
+from PyQt5.QtGui import QImage
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
-from PyQt5.QtMultimediaWidgets import QVideoWidget
-from PyQt5.QtWidgets import QMainWindow, QVBoxLayout, QStyle, QFileDialog, QListWidgetItem, QApplication
+from PyQt5.QtWidgets import QMainWindow, QVBoxLayout, QStyle, QFileDialog, QListWidgetItem, QApplication, QStatusBar
 from PyQt5.uic import loadUi
-from imutils.video import count_frames
-from DetectedObject import ObjectMap
+
 from Detector import CellDetector
-from ListWidget import ListWidget, QCustomQWidget
+from ListWidget import QCustomQWidget
 from ProcessDialog import ProcessDialog
+from SaveDialog import SaveDialog
 from VideoWidget import VideoWidget
 from Worker import PreprocessThread, VideoWriterThread, ObjectMappingThread
-from forms.Ui_mainwindow import Ui_MainWindow
-import numpy as np
+import matplotlib.pyplot as plt
+
+from mfutils import toQImage, drawBoxes, getHHMMSSFormat
 
 
 class MainWindow(QMainWindow):
@@ -26,6 +27,7 @@ class MainWindow(QMainWindow):
         self.ui = loadUi('forms/mainwindow.ui', self)
         # self.ui = Ui_MainWindow()
         # self.ui.setupUi(self)
+        self.input_name = None
         self.mediaPlayer = QMediaPlayer(None, QMediaPlayer.VideoSurface)
         self.videoWidget = VideoWidget(self)
         self.detector = CellDetector()
@@ -40,12 +42,16 @@ class MainWindow(QMainWindow):
         self.ui.saveButton.clicked.connect(self.saveFile)
         self.ui.saveButton.setEnabled(False)
         self.ui.timeSlider.sliderMoved.connect(self.setPosition)
+        self.ui.modeCheckBox.stateChanged.connect(self.switchMode)
+        self.ui.statusbar:QStatusBar
         self.ui.statusbar.showMessage("Init Model ...")
+        # self.ui.statusbar.setLayout()
         self.mediaPlayer.setVideoOutput(self.videoWidget.videoSurface())
         self.mediaPlayer.stateChanged.connect(self.mediaStateChanged)
         self.mediaPlayer.positionChanged.connect(self.positionChanged)
         self.mediaPlayer.durationChanged.connect(self.durationChanged)
-        self.mediaPlayer.videoAvailableChanged.connect(self.clearDetectLog)
+        # self.mediaPlayer.videoAvailableChanged.connect(self.ui.listWidget.clear)
+        self.mediaPlayer.setMuted(True)
         # s_max = self.maximumSize()
         # # self.ui.statusBar.setSizeGripEnabled(False)
         # self.show()
@@ -58,22 +64,28 @@ class MainWindow(QMainWindow):
     def closeEvent(self, *args, **kwargs):
         QApplication.closeAllWindows()
 
-    def openFile(self):
-        file_name = QFileDialog.getOpenFileName(self, "Open Video")[0]
-        if os.path.exists(file_name):
+    def switchMode(self,state):
+        self.detector.setMode(state)
+        self.startProcess()
+
+    def startProcess(self):
+        if self.input_name:
+            self.ui.listWidget.clear()
             self.sum_cells = 0
-            self.mediaPlayer.setMedia(QMediaContent(QUrl.fromLocalFile(file_name)))
-            self.cap = cv2.VideoCapture(file_name)
+            self.log = []
+            self.mediaPlayer.setMedia(QMediaContent(QUrl.fromLocalFile(self.input_name)))
+            self.cap = cv2.VideoCapture(self.input_name)
             self.frameCount = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            self.fps = np.ceil(self.cap.get(cv2.CAP_PROP_FPS))
+            fps = np.ceil(self.cap.get(cv2.CAP_PROP_FPS))
             window_time = 2  # sec
             dialog = ProcessDialog(self)
             dialog.setMaximum(self.frameCount)
-            map_worker = ObjectMappingThread(self.frameCount, self.fps)
+            map_worker = ObjectMappingThread(self.frameCount, fps)
             map_worker.onUpdateObject.connect(self.updateObject)
             map_worker.onUpdateProgress.connect(dialog.updateProgress)
-            ppc_worker = PreprocessThread(file_name)
+            ppc_worker = PreprocessThread(self.input_name)
             ppc_worker.onFrameChanged.connect(map_worker.updateOpticalFlow)
+            ppc_worker.onFrameChanged.connect(self.detector.updateOpticalFlow)
             ppc_worker.onBufferReady.connect(self.detector.detect)
             ppc_worker.onUpdateProgress.connect(dialog.updateProgress)
             map_worker.onNewDetectedCells.connect(self.updateDetectLog)
@@ -90,50 +102,50 @@ class MainWindow(QMainWindow):
             self.ui.playButton.setEnabled(True)
             self.ui.saveButton.setEnabled(True)
 
+    def openFile(self):
+        file_name = QFileDialog.getOpenFileName(self, "Open Video")[0]
+        if os.path.exists(file_name):
+            self.input_name = file_name
+            self.startProcess()
+
     def saveFile(self):
-        worker = VideoWriterThread(self.cap, self.map, 'output.avi')
-        dialog = ProcessDialog()
-        dialog.setMaximum(self.frameCount)
-        worker.onUpdateProgress.connect(dialog.updateProgress)
-        worker.finished.connect(dialog.close)
-        dialog.show()
-        worker.start()
+        dialog = SaveDialog()
         dialog.exec_()
+        head, tail = os.path.split(self.input_name)
+        file_prefix = tail.split('.')[0]
+        worker = VideoWriterThread(self.cap, self.frame_objects, self.log, file_prefix,
+                                   dialog.getSaveDirectory(),
+                                   dialog.isSaveImage,
+                                   dialog.isSaveVideo)
+        worker.start()
 
     def updateObject(self, frame_objects):
+        self.frame_objects = frame_objects
         duration = self.mediaPlayer.duration()
         self.videoWidget.setOutput(frame_objects, duration / self.frameCount)
         self.ui.playButton.setEnabled(True)
         self.ui.saveButton.setEnabled(True)
 
-    def clearDetectLog(self):
-        self.ui.listWidget
-
-    def updateDetectLog(self, detected_frame_id, cell_count):
-        myQCustomQWidget = QCustomQWidget()
+    def updateDetectLog(self, detected_frame_id, cell_map, cell_count):
+        # append log
+        widget = QCustomQWidget()
         self.sum_cells += cell_count
-        myQCustomQWidget.setCount(cell_count)
-        myQCustomQWidget.setTimeText(self.fps * detected_frame_id)
-        myQListWidgetItem = QListWidgetItem(self.ui.listWidget)
-        myQListWidgetItem.setSizeHint(myQCustomQWidget.sizeHint())
-        self.ui.listWidget.addItem(myQListWidgetItem)
-        self.ui.listWidget.setItemWidget(myQListWidgetItem, myQCustomQWidget)
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, detected_frame_id)
+        _, image = self.cap.read()
+        _, min, sec = getHHMMSSFormat(self.mediaPlayer.duration() / self.frameCount * detected_frame_id)
+        time_text = '{:02}-{:02}'.format(min, sec)
+        self.log.append({"image": image.copy(), "detect_time": time_text, "cells": cell_map})
+        drawBoxes(image, cell_map, (0, 255, 0))
+        icon = imutils.resize(image, height=64)
+        icon = toQImage(icon)
+        widget.setPreviewImg(icon)
+        widget.setCount(cell_count)
+        widget.setTimeText('{:02}:{:02}'.format(min, sec))
+        list_widget_item = QListWidgetItem(self.ui.listWidget)
+        list_widget_item.setSizeHint(widget.size())
+        self.ui.listWidget.addItem(list_widget_item)
+        self.ui.listWidget.setItemWidget(list_widget_item, widget)
         self.ui.totalNumber.display(self.sum_cells)
-        # sum = 0
-        # for log in logs:
-        #     # Create QCustomQWidget
-        #     myQCustomQWidget = QCustomQWidget()
-        #     sum += log['cells_count']
-        #     myQCustomQWidget.setCount(log['cells_count'])
-        #     myQCustomQWidget.setTimeText(log['min_time'])
-        #     # Create QListWidgetItem
-        #     myQListWidgetItem = QListWidgetItem(self.ui.listWidget)
-        #     # Set size hint
-        #     myQListWidgetItem.setSizeHint(myQCustomQWidget.sizeHint())
-        #     # Add QListWidgetItem into QListWidget
-        #     self.ui.listWidget.addItem(myQListWidgetItem)
-        #     self.ui.listWidget.setItemWidget(myQListWidgetItem, myQCustomQWidget)
-        # self.ui.totalNumber.display(sum)
 
     def play(self):
         if self.mediaPlayer.state() == QMediaPlayer.PlayingState:
@@ -149,9 +161,15 @@ class MainWindow(QMainWindow):
 
     def positionChanged(self, position):
         self.ui.timeSlider.setValue(position)
+        duration = self.mediaPlayer.duration()
+        _, dmin, dsec = getHHMMSSFormat(duration)
+        _, pmin, psec = getHHMMSSFormat(position)
+        self.ui.timeLabel.setText('{:02}:{:02}/{:02}:{:02}'.format(int(pmin), int(psec), int(dmin), int(dsec)))
 
     def durationChanged(self, duration):
         self.ui.timeSlider.setRange(0, duration)
+        _, dmin, dsec = getHHMMSSFormat(duration)
+        self.ui.timeLabel.setText('00:00/{:02}:{:02}'.format(int(dmin), int(dsec)))
 
     def setPosition(self, position):
         self.mediaPlayer.setPosition(position)

@@ -34,58 +34,65 @@ class ProcessName(enum.Enum):
 class VideoWriterThread(QThread):
     onUpdateProgress = QtCore.pyqtSignal(int)
 
-    def __init__(self, cap, map, file_name, mode='All'):
+    def __init__(self, cap, frame_objects, log, file_prefix, out_dir, save_image=True, save_video=True):
         QThread.__init__(self)
         self.cap = cap
-        self.map = map
-        self.file_name = file_name
+        self.frame_objects = frame_objects
+        self.log = log
+        self.save_image = save_image
+        self.save_video = save_video
+        self.out_dir = out_dir
+        self.file_prefix = file_prefix
+        self.vid_file_name = os.path.join(self.out_dir, self.file_prefix + "_out.avi")
+        logger.info("save video : {}".format(self.vid_file_name))
 
     def __del__(self):
         self.wait()
 
     def run(self):
+        logger.info("start save video")
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
         fourcc = cv2.VideoWriter_fourcc(*'XVID')
         fwidth = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         fheight = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         flenght = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         frate = int(self.cap.get(cv2.CAP_PROP_FPS))
-        out = cv2.VideoWriter(self.file_name, fourcc, frate, (fwidth, fheight))
+        out = cv2.VideoWriter(self.vid_file_name, fourcc, frate, (fwidth, fheight))
+        self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
         for i in range(0, flenght):
             ret, frame = self.cap.read()
-            bnd = self.map[i]
-            if bnd:
-                top, left, bottom, right = bnd['area'].bbox
-                cv2.rectangle(frame, (left, top), (right, bottom), (255, 0, 0), 2)
-                cv2.putText(frame, 'count : ' + str(len(bnd['cell_bndbox'])), (10, 30),
+            objects = self.frame_objects[i]["cells"]
+            total_count = len(self.log[-1]['cells'].values())
+            for id, obj in objects.items():
+                cv2.rectangle(frame, (int(obj.left()), int(obj.top())),
+                              (int(obj.right()), int(obj.bottom())),
+                              (255, 0, 0), 2)
+                cv2.putText(frame, 'id {}'.format(id), (int(obj.right()), int(obj.bottom())), cv2.FONT_HERSHEY_SIMPLEX,
+                            1, (0, 255, 0))
+            cv2.putText(frame, 'total count : ' + str(total_count), (10, 30),
+                        fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1,
+                        color=(255, 255, 255))
+
+            # self.onUpdateProgress.emit(i)
+            out.write(frame)
+
+        for log in self.log:
+            image = log['image']
+            detect_time = log['detect_time']
+            cells = log['cells']
+            for id, obj in cells.items():
+                cv2.rectangle(image, (int(obj.left()), int(obj.top())),
+                              (int(obj.right()), int(obj.bottom())),
+                              (0,255, 0), 2)
+                cv2.putText(image, 'id {}'.format(id), (int(obj.right()), int(obj.bottom())), cv2.FONT_HERSHEY_SIMPLEX,
+                            1, (0, 255, 0))
+                cv2.putText(image, 'total count : ' + str(total_count), (10, 30),
                             fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1,
                             color=(255, 255, 255))
-                for cell in bnd['cell_bndbox']:
-                    top, left, bottom, right = cell.bbox
-                    cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
-            self.onUpdateProgress.emit(i)
-            out.write(frame)
+            file_name = os.path.join(self.out_dir, self.file_prefix + "_" + detect_time + ".png")
+            cv2.imwrite(file_name, image)
         out.release()
-
-
-def find_inactive(bin_signal):
-    diff_signal = np.diff(bin_signal.astype(int))
-    gaps = []
-    idx_down = 0
-    for i, d in enumerate(diff_signal):
-        if d > 0:
-            gaps.append((idx_down, i))
-            down = False
-        if d < 0:
-            idx_down = i + 1
-            down = True
-    if np.sum(bin_signal) != 0:
-        if down:
-            gaps.append((idx_down, i + 2))
-    else:
-        gaps.append((idx_down, len(bin_signal)))
-
-    return np.array(gaps)
+        logger.info("save finish")
 
 
 window_time = 2
@@ -108,42 +115,6 @@ class PreprocessThread(QThread):
     def __del__(self):
         self.wait()
 
-    def movement_cell_locations(self, frame):
-        try:
-            thresh = threshold_yen(frame)
-        except:
-            thresh = threshold_yen(frame)
-        binary = frame >= thresh
-        closed = binary_closing(binary)
-        # dilated = dilation(binary, square(5))
-        label_img = label(closed)
-        cellLocs = regionprops(label_img)
-        cellLocs = [p for p in cellLocs if p.area > 100]
-        return cellLocs
-
-    def find_count_area(self, frame):
-        gray_img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        binary = gray_img > 0.7 * 255
-        closed = binary_closing(binary)
-        eroded = dilation(closed, square(5))
-        label_img = label(eroded, background=1)
-        regions = regionprops(label_img)
-        center = (int(gray_img.shape[0] / 2), int(gray_img.shape[1] / 2))
-        area = min(regions, key=lambda props: distance.euclidean(center, props.centroid))
-        # top, left, bottom, right = area.bbox
-        # cv2.rectangle(gray_img, (left, top), (right, bottom), (0, 255, 0), 2)
-        # plt.imshow(gray_img)
-        # plt.show()
-        return area
-
-    def cell_detect(self, image):
-        cellLocs = self.movement_cell_locations(image)
-        # plt.imshow(image)
-        # plt.show()
-        if len(cellLocs) > 10:
-            cellLocs = []
-        return cellLocs
-
     def run(self):
         QApplication.processEvents()
         logger.info('start preprocess video')
@@ -157,6 +128,7 @@ class PreprocessThread(QThread):
         targetSize = (640, 360)
         # prev = cv2.resize(prev, targetSize)
         prev_gray = cv2.cvtColor(prev, cv2.COLOR_BGR2GRAY)
+        # prev_gray = cv2.GaussianBlur(prev_gray, (5, 5), 0)
         buffer.append(prev_gray.astype("int16"))
         # frame_count = 500
         if not os.path.exists(self.dataFileName):
@@ -174,6 +146,7 @@ class PreprocessThread(QThread):
                 # Convert to grayscale
                 # curr = cv2.resize(curr, targetSize)
                 curr_gray = cv2.cvtColor(curr, cv2.COLOR_BGR2GRAY)
+                # curr_gray = cv2.GaussianBlur(curr_gray, (5, 5), 0)
                 # Calculate optical flow (i.e. track feature points)
                 curr_pts, status, err = cv2.calcOpticalFlowPyrLK(prev_gray, curr_gray, prev_pts, None)
                 # Sanity check
@@ -189,7 +162,7 @@ class PreprocessThread(QThread):
                 dy = H[1, 2]
                 d.append([dx, dy])
                 self.onFrameChanged.emit([dx, dy])
-                if dx < move_thres and dy < move_thres:
+                if abs(dx) < move_thres and abs(dy) < move_thres:
                     buffer.append(prev_gray.astype("int16"))
                     if len(buffer) == window_size:
                         # send buffer to predict
@@ -200,8 +173,7 @@ class PreprocessThread(QThread):
                 else:
                     tmp.extend(buffer)
                     if len(tmp) >= window_size:
-                        self.onBufferReady.emit(frameId - 1, buffer[-window_size:])
-                    self.onBufferReady.emit(frameId, [])
+                        self.onBufferReady.emit(frameId - 1, tmp[-window_size:])
                     # clear buffer
                     tmp = []
                     buffer = []
@@ -226,7 +198,7 @@ class PreprocessThread(QThread):
                 (dx, dy) = d[frameId]
                 curr = self.fvs.read()
                 self.onFrameChanged.emit([dx, dy])
-                if dx < move_thres and dy < move_thres:
+                if abs(dx) < move_thres and abs(dy) < move_thres:
                     buffer.append(prev_gray.astype("int16"))
                     if len(buffer) == window_size:
                         # send buffer to predict
@@ -237,7 +209,7 @@ class PreprocessThread(QThread):
                 else:
                     tmp.extend(buffer)
                     if len(tmp) >= window_size:
-                        self.onBufferReady.emit(frameId - 1, buffer[-window_size:])
+                        self.onBufferReady.emit(frameId - 1, tmp[-window_size:])
                     # clear buffer
                     tmp = []
                     buffer = []
@@ -248,35 +220,12 @@ class PreprocessThread(QThread):
             if len(buffer) >= step_size:
                 self.onBufferReady.emit(frameId, buffer[-window_size:])
         logger.debug('preprocess finished')
-        # self.onFrameChanged.emit(d)
-        # kernelSize = int(fps * 2)
-        # bx = np.abs(d[0]) > 0.5
-        # by = np.abs(d[1]) > 0.5
-        # bn = bx | by
-        # bn = binary_closing(bn, structure=np.ones(kernelSize))
-        # bn = bn[:frame_count]
-        # # plt.figure(figsize=(20, 5))
-        # # plt.plot(bn)
-        # # plt.show()
-        # inactive_intervals = find_inactive(bn)
-        # for startId, endId in inactive_intervals:
-        #     for start in range(startId, endId - step_size, step_size):
-        #         key_list = list(range(start, start + window_size))
-        #         if start + window_size > endId:
-        #             d_buff = d[:, endId - window_size:endId]
-        #             window = buffer[endId - window_size:endId]
-        #         else:
-        #             d_buff = d[:, start:start + window_size]
-        #             window = buffer[start:start + window_size]
-        #         # window = diff_frames[start:start + windowSize - 1]
-        #         self.onBufferReady.emit(key_list, d_buff, window)
-        # self.onFinish.emit()
 
 
 class ObjectMappingThread(QThread):
     onUpdateProgress = QtCore.pyqtSignal(int, str)
     onUpdateObject = QtCore.pyqtSignal(defaultdict)
-    onNewDetectedCells = QtCore.pyqtSignal(int, int)
+    onNewDetectedCells = QtCore.pyqtSignal(int, OrderedDict, int)
 
     def __init__(self, frame_count, fps):
         QThread.__init__(self)
@@ -364,8 +313,6 @@ class ObjectMappingThread(QThread):
                 if row in used_rows or col in used_cols:
                     continue
                 object_id = object_ids[row]
-                obj = self.objects[object_id]
-                print(d[row, col])
                 if d[row, col] < 80:
                     self.objects[object_id] = rects[col]
                     self.disappeared[object_id] = 0
@@ -392,8 +339,10 @@ class ObjectMappingThread(QThread):
         # centroid_idx = self.tracker.update(rects)
         for i in range(start_id, end_id):
             x, y = self.flow_list[i]
+            counting_area = self.counting_area.translated(x,y)
             translated = OrderedDict([(k, cell.translated(x, y)) for k, cell in self.objects.items()])
-            self.objectmap[i + 1] = {'area': None, 'cells': translated, 'scores': []}
+            self.objectmap[i + 1] = {'area': counting_area, 'cells': translated, 'scores': []}
+            self.counting_area = counting_area
             self.objects.update(translated)
             self.onUpdateProgress.emit(i + 1, 'objectMapping')
         self.currFrameId = end_id
@@ -403,7 +352,8 @@ class ObjectMappingThread(QThread):
         while True:
             # otherwise, ensure the queue has room in it
             if not self.Q.empty():
-                (end_id, detected_cells, scores) = self.Q.get()
+                (end_id, counting_area, detected_cells, scores) = self.Q.get()
+                self.counting_area = QRectF(*counting_area)
                 detected_cells = [QRectF(*cell) for cell in detected_cells]
                 start_id = int(end_id + 1 - self.window_size)
                 if self.currFrameId < start_id:
@@ -414,9 +364,9 @@ class ObjectMappingThread(QThread):
                 # last_cells = self.objectmap[self.currFrameId]["cells"]
                 new_count = self.updateObject(detected_cells)
                 if new_count > 0:
-                    self.onNewDetectedCells.emit(self.currFrameId, new_count)
+                    self.onNewDetectedCells.emit(self.currFrameId, self.objects, new_count)
                 # new and last conflict
-                self.objectmap[self.currFrameId] = {'area': None, 'cells': self.objects.copy(), 'scores': scores}
+                self.objectmap[self.currFrameId] = {'area': QRectF(*counting_area), 'cells': self.objects.copy(), 'scores': scores}
                 self.translateObjects(self.currFrameId, end_id)
 
                 logger.debug("progress {}/{} : cell{} - scores{}".format(end_id, self.frame_count, str(detected_cells),
