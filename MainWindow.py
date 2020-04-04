@@ -5,9 +5,10 @@ import cv2
 import imutils
 import numpy as np
 from PyQt5.QtCore import QUrl
-from PyQt5.QtGui import QImage
+from PyQt5.QtGui import QImage, QKeySequence
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
-from PyQt5.QtWidgets import QMainWindow, QVBoxLayout, QStyle, QFileDialog, QListWidgetItem, QApplication, QStatusBar
+from PyQt5.QtWidgets import QMainWindow, QVBoxLayout, QStyle, QFileDialog, QListWidgetItem, QApplication, QStatusBar, \
+    QShortcut
 from PyQt5.uic import loadUi
 
 from Detector import CellDetector
@@ -50,8 +51,9 @@ class MainWindow(QMainWindow):
         self.mediaPlayer.stateChanged.connect(self.mediaStateChanged)
         self.mediaPlayer.positionChanged.connect(self.positionChanged)
         self.mediaPlayer.durationChanged.connect(self.durationChanged)
-        # self.mediaPlayer.videoAvailableChanged.connect(self.ui.listWidget.clear)
         self.mediaPlayer.setMuted(True)
+        # shortcut
+        QShortcut(QKeySequence('Space'), self).activated.connect(self.play)
         # s_max = self.maximumSize()
         # # self.ui.statusBar.setSizeGripEnabled(False)
         # self.show()
@@ -140,7 +142,10 @@ class MainWindow(QMainWindow):
         icon = toQImage(icon)
         widget.setPreviewImg(icon)
         widget.setCount(cell_count)
+        widget.setDetectionFramePosition(self.mediaPlayer.duration() / self.frameCount * detected_frame_id)
         widget.setTimeText('{:02}:{:02}'.format(min, sec))
+        # widget.onDoubleClick.connect(self.positionChanged)
+        widget.onDoubleClick.connect(self.setPosition)
         list_widget_item = QListWidgetItem(self.ui.listWidget)
         list_widget_item.setSizeHint(widget.size())
         self.ui.listWidget.addItem(list_widget_item)

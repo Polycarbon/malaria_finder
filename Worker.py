@@ -83,7 +83,7 @@ class VideoWriterThread(QThread):
             for id, obj in cells.items():
                 cv2.rectangle(image, (int(obj.left()), int(obj.top())),
                               (int(obj.right()), int(obj.bottom())),
-                              (0,255, 0), 2)
+                              (0, 255, 0), 2)
                 cv2.putText(image, 'id {}'.format(id), (int(obj.right()), int(obj.bottom())), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (0, 255, 0))
                 cv2.putText(image, 'total count : ' + str(total_count), (10, 30),
@@ -238,12 +238,15 @@ class ObjectMappingThread(QThread):
         self.objects = OrderedDict()
         self.disappeared = OrderedDict()
         self.nextObjectID = 0
+        self.countId = 0
         self.lastFrameId = 0
         self.currFrameId = 0
         self.Q = Queue()
         self.tracker = CentroidTracker()
         self.flow_list = []
         self.objectId = 0
+        self.mask_area = None
+        self.last_area = QRectF()
 
     def __del__(self):
         self.wait()
@@ -314,7 +317,8 @@ class ObjectMappingThread(QThread):
                     continue
                 object_id = object_ids[row]
                 if d[row, col] < 80:
-                    self.objects[object_id] = rects[col]
+                    rect = rects[col].getRect()
+                    self.objects[object_id].setRect(*rect)
                     self.disappeared[object_id] = 0
                     used_rows.add(row)
                     used_cols.add(col)
@@ -335,26 +339,47 @@ class ObjectMappingThread(QThread):
         # return the set of trackable objects
         return new_object
 
-    def translateObjects(self, start_id, end_id):
+    def translateObjects(self, start_id, end_id, area=None):
         # centroid_idx = self.tracker.update(rects)
         for i in range(start_id, end_id):
             x, y = self.flow_list[i]
-            counting_area = self.counting_area.translated(x,y)
+            self.mask_area.translate(x, y)
             translated = OrderedDict([(k, cell.translated(x, y)) for k, cell in self.objects.items()])
-            self.objectmap[i + 1] = {'area': counting_area, 'cells': translated, 'scores': []}
-            self.counting_area = counting_area
+            self.objectmap[i + 1] = {'area': area, 'cells': translated, 'scores': []}
             self.objects.update(translated)
             self.onUpdateProgress.emit(i + 1, 'objectMapping')
         self.currFrameId = end_id
         self.onUpdateObject.emit(self.objectmap)
 
+    def countInArea(self, area):
+        new_count = 0
+        for cell in self.objects.values():
+            intersected = area.intersected(cell)
+            intersected_ratio = (intersected.width()*intersected.height())/(cell.height()*cell.width())
+            if intersected_ratio > 0.8 and not cell.counted():
+                cell.count(self.countId)
+                self.countId += 1
+                new_count += 1
+        return new_count
+
     def run(self):
         while True:
             # otherwise, ensure the queue has room in it
             if not self.Q.empty():
-                (end_id, counting_area, detected_cells, scores) = self.Q.get()
-                self.counting_area = QRectF(*counting_area)
-                detected_cells = [QRectF(*cell) for cell in detected_cells]
+                (end_id, c_area, detected_cells, scores) = self.Q.get()
+                counting_area = QRectF(*c_area)
+                if self.mask_area is None:
+                    self.mask_area = QRectF(*c_area)
+                else:
+                    intersec_area = counting_area.intersected(self.mask_area)
+                    area_ratio = (intersec_area.width() * intersec_area.height()) / (
+                                counting_area.width() * counting_area.height())
+                    if area_ratio > 0.8:
+                        self.mask_area = QRectF(*c_area)
+                    else:
+                        self.last_area = self.mask_area
+                        self.mask_area = QRectF(*c_area)
+                detected_cells = [CellRect(*cell, score=score) for cell, score in zip(detected_cells, scores)]
                 start_id = int(end_id + 1 - self.window_size)
                 if self.currFrameId < start_id:
                     # get last cells
@@ -363,14 +388,42 @@ class ObjectMappingThread(QThread):
 
                 # last_cells = self.objectmap[self.currFrameId]["cells"]
                 new_count = self.updateObject(detected_cells)
+                new_count = self.countInArea(counting_area.united(self.last_area))
                 if new_count > 0:
                     self.onNewDetectedCells.emit(self.currFrameId, self.objects, new_count)
                 # new and last conflict
-                self.objectmap[self.currFrameId] = {'area': QRectF(*counting_area), 'cells': self.objects.copy(), 'scores': scores}
-                self.translateObjects(self.currFrameId, end_id)
+                self.objectmap[self.currFrameId] = {'area': counting_area, 'cells': self.objects.copy(),
+                                                    'scores': scores}
+                self.translateObjects(self.currFrameId, end_id, counting_area)
 
                 logger.debug("progress {}/{} : cell{} - scores{}".format(end_id, self.frame_count, str(detected_cells),
                                                                          str(scores)))
                 if end_id == self.frame_count - 1:
                     self.sleep(1)
                     return
+
+
+class CellRect(QRectF):
+    def __init__(self, *__args, score=None, isCount=False, count_id=None):
+        QRectF.__init__(self, *__args)
+        self.score = score
+        self.isCount = isCount
+        self.count_id = count_id
+
+    def getScore(self):
+        return self.score
+
+    def counted(self):
+        return self.isCount
+
+    def count(self, id):
+        self.isCount = True
+        self.count_id = id
+
+    def getCountId(self):
+        assert self.count_id is not None
+        return self.count_id
+
+    def translated(self, *__args):
+        translate = super().translated(*__args)
+        return CellRect(*translate.getRect(), score=self.score, isCount=self.isCount, count_id=self.count_id)

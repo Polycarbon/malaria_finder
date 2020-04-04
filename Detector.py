@@ -7,7 +7,7 @@ import numpy as np
 from scipy.spatial import distance
 from skimage.filters import threshold_yen
 from skimage.measure import label, regionprops
-from skimage.morphology import binary_closing, dilation, square
+from skimage.morphology import binary_closing, dilation, square, erosion
 
 from keras_retinanet import models
 from keras_retinanet.utils.image import resize_image, preprocess_image
@@ -44,10 +44,10 @@ class CellDetector(QObject):
             self.onInitModelSuccess.emit()
 
     def setMode(self, mode):
-        if mode ==1:
+        if mode == 1:
             self.mode = RESNET
         else:
-            self.mode=PROPER_REGION
+            self.mode = PROPER_REGION
 
     def setObjectMap(self, objectmap):
         self.objectmap = objectmap
@@ -58,17 +58,28 @@ class CellDetector(QObject):
     @staticmethod
     def find_count_area(gray):
         binary = gray > 0.7 * 255
-        closed = binary_closing(binary)
-        eroded = dilation(closed, square(5))
+        closed = binary_closing(binary, square(5))
+
+        dialated = dilation(closed, square(30))
+        eroded = erosion(dialated, square(20))
         label_img = label(eroded, background=1)
         regions = regionprops(label_img)
         center = (int(gray.shape[0] / 2), int(gray.shape[1] / 2))
         area = min(regions, key=lambda props: distance.euclidean(center, props.centroid))
-        top, left, bottom, right = area.bbox
-        # cv2.rectangle(gray_img, (left, top), (right, bottom), (0, 255, 0), 2)
-        # plt.imshow(gray_img)
+
+        t, l, b, r = area.bbox
+        margin =10
+        # plt.subplot(221)
+        # plt.imshow(binary)
+        # plt.subplot(222)
+        # plt.imshow(closed)
+        # plt.subplot(223)
+        # plt.imshow(eroded)
+        # cv2.rectangle(gray, (l, t), (r, b), (0, 255, 0), 4)
+        # plt.subplot(224)
+        # plt.imshow(gray)
         # plt.show()
-        return top, left, top-bottom, right-left
+        return l-margin, t-margin, r - l+(2*margin), b - t+(2*margin)
 
     def detect(self, cur_frame_id, buffer):
         logger.info('Detecting Image')
@@ -98,10 +109,16 @@ class CellDetector(QObject):
             for cell, score in zip(boxes[0], scores[0]):
                 if score > 0.5:
                     l, t, r, b = cell
-                    cells.append((l, t, r - l, b - t))
+                    cells.append([int(l), int(t), int(r - l), int(b - t)])
                     # cells.append(cell)
                     sc.append(score)
-            self.onDetectSuccess.emit(cur_frame_id,counting_area, cells, sc)
+            # min cluster size = 2, min distance = 0.5:
+            cells.extend(cells)
+            cells, weights = cv2.groupRectangles(cells, 1, 1.0)
+            if len(cells) == 0:
+                self.onDetectSuccess.emit(cur_frame_id, counting_area, [], [])
+                return
+            self.onDetectSuccess.emit(cur_frame_id, counting_area, cells.tolist(), sc)
 
         if self.mode == PROPER_REGION:
             image = normframe
@@ -118,10 +135,12 @@ class CellDetector(QObject):
             for cell in cell_locs:
                 t, l, b, r = cell.bbox
                 if cell.area > 100:
-                    cells.append((l, t, r - l, b - t))
+                    cells.append([l, t, r - l, b - t])
             if len(cells) > 5:
                 self.onDetectSuccess.emit(cur_frame_id, counting_area, [], [])
                 return
+            # cells.extend(cells)
+            cells, weights = cv2.groupRectangles(cells, 0, 0.5)
             # cell_locs = [p.bbox for p in cell_locs if p.area > 100]
             sc = [1.0] * len(cells)
-            self.onDetectSuccess.emit(cur_frame_id, counting_area, cells, sc)
+            self.onDetectSuccess.emit(cur_frame_id, counting_area, list(cells), sc)

@@ -1,9 +1,11 @@
 import sys
 
+import cv2
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtWidgets import QWidget, QApplication, QVBoxLayout, QLabel, QHBoxLayout, QMainWindow, QListWidget, \
     QListWidgetItem
-
+import numpy as np
+import matplotlib.pyplot as plt
 
 class QCustomQWidget (QWidget):
     def __init__ (self, parent = None):
@@ -58,7 +60,29 @@ class exampleQMainWindow (QMainWindow):
         self.setCentralWidget(self.myQListWidget)
 
 if __name__ == "__main__":
-    app = QApplication([])
-    window = exampleQMainWindow()
-    window.show()
-    sys.exit(app.exec_())
+    def draw(rects, color):
+        for l,t,w,h in rects:
+            p1 = (l, t)
+            p2 = (l +w, t + h)
+            cv2.rectangle(ocv, p1, p2, color, 2)
+
+
+    # draw image
+    ocv = np.ones((400, 400, 3), np.uint8) * 127
+
+    # demo array of 3 rects (the 1st 2 overlap and should be merged):
+    rects = [[20, 20, 120, 130], [40, 40, 140, 100], [150, 150, 100, 100]]
+    draw(rects, (0, 200, 0))
+
+    # duplicate all of them ;)
+    l = len(rects)
+    for r in range(l):
+        rects.append(rects[r])
+
+    # min cluster size = 2, min distance = 0.5:
+    rects, weights = cv2.groupRectangles(rects, 1, .5)
+    draw(rects, (200, 0, 0))
+    plt.imshow(ocv)
+    plt.show()
+    print(rects)
+    print(weights)

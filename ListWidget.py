@@ -10,32 +10,22 @@ from forms.Ui_WidgetItem import Ui_Form
 
 
 class QCustomQWidget(QWidget):
+    onDoubleClick = QtCore.pyqtSignal(int)
+
     def __init__(self, parent=None):
         super(QCustomQWidget, self).__init__()
         self.ui = loadUi("forms/widgetitem.ui", self)
         self.setFixedSize(self.size())
-        # super(QCustomQWidget, self).__init__(parent)
-        # self.textQVBoxLayout = QVBoxLayout()
-        # self.textUpQLabel = QLabel()
-        # self.cellNumber = QLCDNumber()
-        # self.cellNumber.setFixedWidth(70)
-        # self.textQVBoxLayout.addWidget(self.textUpQLabel)
-        # self.textQVBoxLayout.addWidget(self.cellNumber)
-        # self.allQHBoxLayout = QHBoxLayout()
-        # self.iconQLabel = QLabel()
-        # self.allQHBoxLayout.addWidget(self.iconQLabel, 0)
-        # self.allQHBoxLayout.addLayout(self.textQVBoxLayout, 1)
-        # self.setLayout(self.allQHBoxLayout)
-        # setStyleSheet
-        # self.textUpQLabel.setStyleSheet('''
-        #     color: rgb(0, 0, 255);
-        # ''')
-        # self.cellNumber.setStyleSheet('''
-        #     color: rgb(255, 0, 0);
-        # ''')
+        self.frame_position = 0
+
+    def mouseDoubleClickEvent(self, QMouseEvent):
+        self.onDoubleClick.emit(self.frame_position)
 
     def setCount(self, count):
         self.ui.cellNumber.display(count)
+
+    def setDetectionFramePosition(self, pos):
+        self.frame_position = pos
 
     def setTimeText(self, text):
         self.ui.timeLabel.setText(text)
