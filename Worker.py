@@ -4,13 +4,14 @@ import os
 from queue import Queue
 
 import cv2
-from PyQt5.QtCore import QThread, QRect, QRectF, QPointF
+from PyQt5.QtCore import QThread, QRect, QRectF, QPointF, Qt
 from PyQt5 import QtCore
 from PyQt5.QtGui import QPolygonF
 from PyQt5.QtWidgets import QApplication
 import numpy as np
 from scipy.spatial.distance import cdist
 
+import VideoInfo
 from ObjectHandler import CellRect, ObjectTracker
 from centroidtracker import CentroidTracker
 from keras_retinanet import models
@@ -248,8 +249,9 @@ class ObjectMapper(QThread):
         self.tracker = ObjectTracker()
         self.flow_list = []
         self.objectId = 0
-        self.mask_area = None
-        self.last_area = QRectF()
+        self.curr_area = None
+        self.last_area = QPolygonF()
+        self.focus_pt = QPointF(VideoInfo.FRAME_WIDTH/2,VideoInfo.FRAME_HEIGHT/2)
 
     def __del__(self):
         self.wait()
@@ -264,9 +266,7 @@ class ObjectMapper(QThread):
     def countInArea(self, area):
         new_count = 0
         for cell in self.objects.values():
-            intersected = area.intersected(cell)
-            intersected_ratio = (intersected.width() * intersected.height()) / (cell.height() * cell.width())
-            if intersected_ratio > 0.8 and not cell.isCounted():
+            if area.containsPoint(cell.center(), Qt.OddEvenFill) and not cell.isCounted():
                 cell.count(self.countId)
                 self.countId += 1
                 new_count += 1
@@ -276,9 +276,15 @@ class ObjectMapper(QThread):
         while True:
             # otherwise, ensure the queue has room in it
             if not self.Q.empty():
-                (end_id, c_area, detected_cells, scores) = self.Q.get()
-                counting_area = QRectF(*c_area)
-                counting_area = QPolygonF(counting_area)
+                (end_id, area_vec, detected_cells, scores) = self.Q.get()
+                area_vec = map(lambda p: QPointF(*p), area_vec)
+                if self.curr_area is None:
+                    self.curr_area = QPolygonF(area_vec)
+
+                if not self.curr_area.containsPoint(self.focus_pt, Qt.OddEvenFill):
+                   self.last_area = self.curr_area
+                   self.curr_area = QPolygonF(area_vec)
+
                 # if self.mask_area is None:
                 #     self.mask_area = QPolygonF(QRectF(*c_area))
                 # else:
@@ -298,7 +304,7 @@ class ObjectMapper(QThread):
                     # last_cells = self.objectmap[self.currFrameId]['cells']
                     for i in range(self.currFrameId, start_id):
                         x, y = self.flow_list[i]
-                        # self.mask_area.translate(x, y)
+                        self.curr_area.translate(x, y)
                         cells = self.tracker.translated(x, y)
                         self.objectmap[i + 1] = {'area': None, 'cells': cells, 'scores': []}
                         self.onUpdateProgress.emit(i + 1, 'objectMapping')
@@ -306,18 +312,18 @@ class ObjectMapper(QThread):
 
                 # last_cells = self.objectmap[self.currFrameId]["cells"]
                 new_count = self.tracker.update(detected_cells)
-                # new_count = self.countInArea(counting_area.united(self.last_area))
+                # new_count = self.countInArea(self.curr_area.united(self.last_area))
                 if new_count > 0:
                     self.onNewDetectedCells.emit(self.currFrameId, self.objects, new_count)
                 # new and last conflict
                 cells = self.tracker.getObjects()
-                self.objectmap[self.currFrameId] = {'area': counting_area, 'cells': cells,
+                self.objectmap[self.currFrameId] = {'area': QPolygonF(self.curr_area), 'cells': cells,
                                                     'scores': scores}
                 for i in range(start_id, end_id):
                     x, y = self.flow_list[i]
-                    # self.mask_area.translate(x, y)
+                    self.curr_area.translate(x, y)
                     cells = self.tracker.translated(x, y)
-                    self.objectmap[i + 1] = {'area': counting_area, 'cells': cells, 'scores': []}
+                    self.objectmap[i + 1] = {'area': QPolygonF(self.curr_area), 'cells': cells, 'scores': []}
                     self.onUpdateProgress.emit(i + 1, 'objectMapping')
                 self.currFrameId = end_id
                 self.onUpdateObject.emit(self.objectmap)

@@ -22,7 +22,7 @@ RESNET = 1
 
 class CellDetector(QObject):
     onInitModelSuccess = QtCore.pyqtSignal()
-    onDetectSuccess = QtCore.pyqtSignal(int, tuple, list, list)
+    onDetectSuccess = QtCore.pyqtSignal(int, list, list, list)
 
     def __init__(self, parent=None):
         super(CellDetector, self).__init__(parent)
@@ -69,18 +69,13 @@ class CellDetector(QObject):
         area = min(regions, key=lambda props: distance.euclidean(center, props.centroid))
 
         t, l, b, r = area.bbox
-        margin =10
-        # plt.subplot(221)
-        # plt.imshow(binary)
-        # plt.subplot(222)
-        # plt.imshow(closed)
-        # plt.subplot(223)
-        # plt.imshow(eroded)
-        # cv2.rectangle(gray, (l, t), (r, b), (0, 255, 0), 4)
-        # plt.subplot(224)
-        # plt.imshow(gray)
-        # plt.show()
-        return l-margin, t-margin, r - l+(2*margin), b - t+(2*margin)
+        margin = 10
+        l = l - margin
+        t = t - margin
+        r = r + margin
+        b = b + margin
+        # return polygon point vector
+        return [(l, t), (r, t), (r, b), (l, b), (l, t)]
 
     def detect(self, cur_frame_id, buffer):
         logger.info('Detecting Image')
@@ -91,7 +86,7 @@ class CellDetector(QObject):
         # if move_distances > 5:
         #     self.onDetectSuccess.emit(cur_frame_id, [], [])
         #     return
-        counting_area = self.find_count_area(buffer[0])
+        area_vec = self.find_count_area(buffer[0])
         frameDiff = np.abs(np.diff(buffer, axis=0))
         frameDiffSum = np.sum(frameDiff, axis=0)
         av = (frameDiffSum / len(frameDiff))
@@ -117,9 +112,9 @@ class CellDetector(QObject):
             cells.extend(cells)
             cells, weights = cv2.groupRectangles(cells, 1, 1.0)
             if len(cells) == 0:
-                self.onDetectSuccess.emit(cur_frame_id, counting_area, [], [])
+                self.onDetectSuccess.emit(cur_frame_id, area_vec, [], [])
                 return
-            self.onDetectSuccess.emit(cur_frame_id, counting_area, cells.tolist(), sc)
+            self.onDetectSuccess.emit(cur_frame_id, area_vec, cells.tolist(), sc)
 
         if self.mode == PROPER_REGION:
             image = normframe
@@ -138,10 +133,10 @@ class CellDetector(QObject):
                 if cell.area > 100:
                     cells.append([l, t, r - l, b - t])
             if len(cells) > 5:
-                self.onDetectSuccess.emit(cur_frame_id, counting_area, [], [])
+                self.onDetectSuccess.emit(cur_frame_id, area_vec, [], [])
                 return
-            # cells.extend(cells)
-            cells, weights = cv2.groupRectangles(cells, 0, 0.5)
+            cells.extend(cells)
+            cells, weights = cv2.groupRectangles(cells, 1, 1.0)
             # cell_locs = [p.bbox for p in cell_locs if p.area > 100]
             sc = [1.0] * len(cells)
-            self.onDetectSuccess.emit(cur_frame_id, counting_area, list(cells), sc)
+            self.onDetectSuccess.emit(cur_frame_id, area_vec, list(cells), sc)

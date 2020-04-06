@@ -11,6 +11,7 @@ from PyQt5.QtWidgets import QMainWindow, QVBoxLayout, QStyle, QFileDialog, QList
     QShortcut
 from PyQt5.uic import loadUi
 
+import VideoInfo
 from Detector import CellDetector
 from ListWidget import QCustomQWidget
 from ProcessDialog import ProcessDialog
@@ -77,6 +78,7 @@ class MainWindow(QMainWindow):
             self.log = []
             self.mediaPlayer.setMedia(QMediaContent(QUrl.fromLocalFile(self.input_name)))
             self.cap = cv2.VideoCapture(self.input_name)
+            VideoInfo.init(self.cap)
             self.frameCount = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
             fps = np.ceil(self.cap.get(cv2.CAP_PROP_FPS))
             window_time = 2  # sec

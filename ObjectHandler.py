@@ -32,7 +32,7 @@ class CellRect(QRectF):
 
     def translated(self, *__args):
         translate = super().translated(*__args)
-        return CellRect(*translate.getRect(), score=self.score, isCount=self.__isCounted, count_id=self.__count_id)
+        return CellRect(translate, score=self.score, isCount=self.__isCounted, count_id=self.__count_id)
 
 
 class ObjectTracker():
