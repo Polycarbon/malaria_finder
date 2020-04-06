@@ -5,6 +5,7 @@ from PyQt5 import QtCore
 from PyQt5.QtCore import QObject, QThread
 import numpy as np
 from scipy.spatial import distance
+from skimage import feature, exposure
 from skimage.filters import threshold_yen
 from skimage.measure import label, regionprops
 from skimage.morphology import binary_closing, dilation, square, erosion
@@ -29,7 +30,7 @@ class CellDetector(QObject):
         self.thread = QThread()
         self.thread.start()
         self.moveToThread(self.thread)
-        self.mode = RESNET
+        self.mode = PROPER_REGION
         self.flow_list = []
 
     def initModel(self, path='src/resnet50.h5', backbone='resnet50'):

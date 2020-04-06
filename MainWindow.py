@@ -16,7 +16,7 @@ from ListWidget import QCustomQWidget
 from ProcessDialog import ProcessDialog
 from SaveDialog import SaveDialog
 from VideoWidget import VideoWidget
-from Worker import PreprocessThread, VideoWriterThread, ObjectMappingThread
+from Worker import PreprocessThread, VideoWriterThread, ObjectMapper
 import matplotlib.pyplot as plt
 
 from mfutils import toQImage, drawBoxes, getHHMMSSFormat
@@ -82,7 +82,7 @@ class MainWindow(QMainWindow):
             window_time = 2  # sec
             dialog = ProcessDialog(self)
             dialog.setMaximum(self.frameCount)
-            map_worker = ObjectMappingThread(self.frameCount, fps)
+            map_worker = ObjectMapper(self.frameCount, fps)
             map_worker.onUpdateObject.connect(self.updateObject)
             map_worker.onUpdateProgress.connect(dialog.updateProgress)
             ppc_worker = PreprocessThread(self.input_name)

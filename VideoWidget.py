@@ -1,5 +1,5 @@
 from PyQt5.QtCore import QRect, QPoint, Qt, QRectF, QPointF
-from PyQt5.QtGui import QImage, QPalette, QPainter, QRegion
+from PyQt5.QtGui import QImage, QPalette, QPainter, QRegion, QPolygonF
 from PyQt5.QtMultimedia import QAbstractVideoSurface, QAbstractVideoBuffer, QVideoFrame, QVideoSurfaceFormat
 from PyQt5.QtWidgets import QWidget, QSizePolicy
 
@@ -79,10 +79,16 @@ class VideoWidgetSurface(QAbstractVideoSurface):
             self.ratio = scaled.width() / origin.width()
             self.refPoint = self.targetRect.topLeft()
 
-    def translatedAndScaled(self, rect):
-        topLeft = (rect.topLeft() * self.ratio) + self.refPoint
-        bottomRight = (rect.bottomRight() * self.ratio) + self.refPoint
-        return QRectF(topLeft, bottomRight)
+    def transformed(self, obj):
+        if type(obj) is QPolygonF:
+            tranformed = QPolygonF()
+            for i in range(obj.size()):
+                tranformed << (obj.at(i) * self.ratio) + self.refPoint
+            return tranformed
+        else:
+            top_left = (obj.topLeft() * self.ratio) + self.refPoint
+            bottom_right = (obj.bottomRight() * self.ratio) + self.refPoint
+            return QRectF(top_left, bottom_right)
 
     def paint(self, painter):
         try:
@@ -107,18 +113,18 @@ class VideoWidgetSurface(QAbstractVideoSurface):
             objects = self.output[frame_id]['cells']
             for o_id, cell in objects.items():
                 # top, left, bottom, right = cell.bbox
-                cell_box = self.translatedAndScaled(cell)
+                cell_box = self.transformed(cell)
                 painter.setBrush(Qt.NoBrush)
                 painter.setPen(Qt.red)
-                if cell.counted():
+                if cell.isCounted():
                     painter.setPen(Qt.green)
                     painter.drawText(cell_box.bottomRight(), "id {}".format(cell.getCountId()))
                 painter.drawRect(cell_box)
             area = self.output[frame_id]['area']
             if area:
-                area = self.translatedAndScaled(area)
+                area = self.transformed(area)
                 painter.setPen(Qt.blue)
-                painter.drawRect(area)
+                painter.drawPolygon(area)
             painter.setTransform(oldTransform)
 
             self.currentFrame.unmap()
