@@ -1,6 +1,7 @@
 from collections import OrderedDict
 
-from PyQt5.QtCore import QRectF
+from PyQt5.QtCore import QRectF, Qt
+from PyQt5.QtGui import QPolygonF
 from scipy.spatial.distance import cdist
 import numpy as np
 
@@ -40,6 +41,7 @@ class ObjectTracker():
         self.__cells = OrderedDict()
         self.__disappeared = OrderedDict()
         self.nextObjectID = 0
+        self.countId = 0
         self.distance_threshold = 80
 
     def __register(self, object):
@@ -133,3 +135,11 @@ class ObjectTracker():
 
     def getObjects(self):
         return self.__cells.copy()
+
+    def countInArea(self, area: QPolygonF):
+        new_count = []
+        for cell in self.__cells.values():
+            if area.containsPoint(cell.center(), Qt.OddEvenFill) and not cell.isCounted():
+                cell.count(self.countId)
+                new_count.append(cell)
+        return new_count

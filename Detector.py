@@ -10,6 +10,8 @@ from skimage.filters import threshold_yen
 from skimage.measure import label, regionprops
 from skimage.morphology import binary_closing, dilation, square, erosion
 
+import VideoInfo
+from LineHandler import extractLines, calculateBoundingPoints
 from keras_retinanet import models
 from keras_retinanet.utils.image import resize_image, preprocess_image
 import matplotlib.pyplot as plt
@@ -86,7 +88,8 @@ class CellDetector(QObject):
         # if move_distances > 5:
         #     self.onDetectSuccess.emit(cur_frame_id, [], [])
         #     return
-        area_vec = self.find_count_area(buffer[0])
+        verticals, horizontals = extractLines(buffer[0])
+        area_vec = calculateBoundingPoints(VideoInfo.FRAME_CENTER, verticals, horizontals)
         frameDiff = np.abs(np.diff(buffer, axis=0))
         frameDiffSum = np.sum(frameDiff, axis=0)
         av = (frameDiffSum / len(frameDiff))

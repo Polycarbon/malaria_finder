@@ -238,4 +238,4 @@ def calculateBoundingPoints(pt, verticals, horizontals):
     topright = intersects[np.logical_and(intersects[:, 0] > pt[0], intersects[:, 1] < pt[1])][0]
     bottomleft = intersects[np.logical_and(intersects[:, 0] < pt[0], intersects[:, 1] > pt[1])][0]
     bottomright = intersects[np.logical_and(intersects[:, 0] > pt[0], intersects[:, 1] > pt[1])][0]
-    coord = [topleft, topright, bottomleft, bottomright]
+    return [topleft, topright, bottomright, bottomleft, topleft]

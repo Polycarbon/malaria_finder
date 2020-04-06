@@ -311,10 +311,11 @@ class ObjectMapper(QThread):
                     self.currFrameId = end_id
 
                 # last_cells = self.objectmap[self.currFrameId]["cells"]
-                new_count = self.tracker.update(detected_cells)
-                # new_count = self.countInArea(self.curr_area.united(self.last_area))
-                if new_count > 0:
-                    self.onNewDetectedCells.emit(self.currFrameId, self.objects, new_count)
+                self.tracker.update(detected_cells)
+                new_count = self.tracker.countInArea(self.curr_area.united(self.last_area))
+                if len(new_count) > 0:
+                    cells = self.tracker.getObjects()
+                    self.onNewDetectedCells.emit(self.currFrameId, cells, len(new_count))
                 # new and last conflict
                 cells = self.tracker.getObjects()
                 self.objectmap[self.currFrameId] = {'area': QPolygonF(self.curr_area), 'cells': cells,
