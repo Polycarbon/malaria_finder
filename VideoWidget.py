@@ -117,9 +117,9 @@ class VideoWidgetSurface(QAbstractVideoSurface):
                 cell_box = self.transformed(cell)
                 painter.setBrush(Qt.NoBrush)
                 painter.setPen(Qt.red)
-                # if cell.isCounted():
-                #     painter.setPen(Qt.green)
-                #     painter.drawText(cell_box.bottomRight(), "id {}".format(cell.getCountId()))
+                if cell.isCounted():
+                    painter.setPen(Qt.green)
+                    painter.drawText(cell_box.bottomRight(), "id {}".format(cell.getCountId()))
                 painter.drawPoint(cell_box.center())
                 painter.drawRect(cell_box)
             area = self.output[frame_id]['area']

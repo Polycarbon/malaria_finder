@@ -106,6 +106,7 @@ class ObjectTracker():
                     rect = rects[col].getRect()
                     self.__cells[object_id].setRect(*rect)
                     self.__disappeared[object_id] = 0
+                    self.__disappeared[object_id] = 0
                     used_rows.add(row)
                     used_cols.add(col)
             unused_rows = set(range(0, d.shape[0])).difference(used_rows)
@@ -135,3 +136,12 @@ class ObjectTracker():
 
     def getObjects(self):
         return self.__cells.copy()
+
+    def countInArea(self, area):
+        new_count = 0
+        for cell in self.__cells.values():
+            if area.containsPoint(cell.center(), Qt.OddEvenFill) and not cell.isCounted():
+                cell.count(self.countId)
+                self.countId += 1
+                new_count += 1
+        return new_count

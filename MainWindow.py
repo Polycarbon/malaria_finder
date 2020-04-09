@@ -5,17 +5,19 @@ import cv2
 import imutils
 import numpy as np
 from PyQt5.QtCore import QUrl
-from PyQt5.QtGui import QImage
+from PyQt5.QtGui import QImage, QKeySequence
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
-from PyQt5.QtWidgets import QMainWindow, QVBoxLayout, QStyle, QFileDialog, QListWidgetItem, QApplication, QStatusBar
+from PyQt5.QtWidgets import QMainWindow, QVBoxLayout, QStyle, QFileDialog, QListWidgetItem, QApplication, QStatusBar, \
+    QShortcut
 from PyQt5.uic import loadUi
 
+import VideoInfo
 from Detector import CellDetector
 from ListWidget import QCustomQWidget
 from ProcessDialog import ProcessDialog
 from SaveDialog import SaveDialog
 from VideoWidget import VideoWidget
-from Worker import PreprocessThread, VideoWriterThread, ObjectMappingThread
+from Worker import PreprocessThread, VideoWriterThread, ObjectMapper
 import matplotlib.pyplot as plt
 
 from mfutils import toQImage, drawBoxes, getHHMMSSFormat
@@ -52,6 +54,8 @@ class MainWindow(QMainWindow):
         self.mediaPlayer.durationChanged.connect(self.durationChanged)
         # self.mediaPlayer.videoAvailableChanged.connect(self.ui.listWidget.clear)
         self.mediaPlayer.setMuted(True)
+        # shortcut
+        QShortcut(QKeySequence('Space'), self).activated.connect(self.play)
         # s_max = self.maximumSize()
         # # self.ui.statusBar.setSizeGripEnabled(False)
         # self.show()
@@ -78,9 +82,10 @@ class MainWindow(QMainWindow):
             self.frameCount = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
             fps = np.ceil(self.cap.get(cv2.CAP_PROP_FPS))
             window_time = 2  # sec
+            VideoInfo.init(self.cap)
             dialog = ProcessDialog(self)
             dialog.setMaximum(self.frameCount)
-            map_worker = ObjectMappingThread(self.frameCount, fps)
+            map_worker = ObjectMapper(self.frameCount, fps)
             map_worker.onUpdateObject.connect(self.updateObject)
             map_worker.onUpdateProgress.connect(dialog.updateProgress)
             ppc_worker = PreprocessThread(self.input_name)
@@ -140,7 +145,9 @@ class MainWindow(QMainWindow):
         icon = toQImage(icon)
         widget.setPreviewImg(icon)
         widget.setCount(cell_count)
+        widget.setDetectionFramePosition(self.mediaPlayer.duration() / self.frameCount * detected_frame_id)
         widget.setTimeText('{:02}:{:02}'.format(min, sec))
+        widget.onDoubleClick.connect(self.setPosition)
         list_widget_item = QListWidgetItem(self.ui.listWidget)
         list_widget_item.setSizeHint(widget.size())
         self.ui.listWidget.addItem(list_widget_item)

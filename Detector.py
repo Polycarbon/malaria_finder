@@ -32,7 +32,7 @@ class CellDetector(QObject):
         self.thread = QThread()
         self.thread.start()
         self.moveToThread(self.thread)
-        self.mode = PROPER_REGION
+        self.mode = RESNET
         self.flow_list = []
 
     def initModel(self, path='src/resnet50.h5', backbone='resnet50'):
@@ -80,7 +80,6 @@ class CellDetector(QObject):
         return [(l, t), (r, t), (r, b), (l, b), (l, t)]
 
     def detect(self, cur_frame_id, buffer):
-        logger.info('Detecting Image')
         v_max = 10
         v_min = 1
         # flow_list = np.array(self.flow_list[cur_frame_id - 50:cur_frame_id]).transpose()
@@ -141,9 +140,10 @@ class CellDetector(QObject):
             cells = []
             for cell in cell_locs:
                 t, l, b, r = cell.bbox
-                if cell.area > 100:
+                if 100 < cell.area:
                     cells.append([l, t, r - l, b - t])
             if len(cells) > 5:
+                # print("num{} move{}".format(len(cells),move_distances))
                 self.onDetectSuccess.emit(cur_frame_id, area_vec, [], [])
                 return
             cells.extend(cells)

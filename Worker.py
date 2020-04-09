@@ -11,6 +11,8 @@ from PyQt5.QtWidgets import QApplication
 import numpy as np
 from scipy.spatial.distance import cdist
 
+import VideoInfo
+from ObjectHandler import ObjectTracker, CellRect
 from centroidtracker import CentroidTracker
 from keras_retinanet import models
 from scipy.ndimage import binary_closing
@@ -77,7 +79,7 @@ class VideoWriterThread(QThread):
                     p2 = area.at(j+1).toPoint()
                     cv2.line(frame, (p1.x(), p1.y()), (p2.x(), p2.y()), (0, 0, 255), 2)
 
-            cv2.putText(frame, 'total count : ' + str(total_count), (10, 30),
+            cv2.putText(frame, 'Total Count : ' + str(total_count), (10, 30),
                         fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1,
                         color=(255, 255, 255))
 
@@ -230,7 +232,7 @@ class PreprocessThread(QThread):
         logger.debug('preprocess finished')
 
 
-class ObjectMappingThread(QThread):
+class ObjectMapper(QThread):
     onUpdateProgress = QtCore.pyqtSignal(int, str)
     onUpdateObject = QtCore.pyqtSignal(defaultdict)
     onNewDetectedCells = QtCore.pyqtSignal(int, OrderedDict, int)
@@ -241,7 +243,8 @@ class ObjectMappingThread(QThread):
         self.frame_count = frame_count
         self.fps = fps
         self.window_size = fps * window_time
-        self.objectmap = defaultdict(lambda: {'area': None, 'cells': [], 'scores': []})
+        self.objectmap = defaultdict(lambda: {'area': None, 'cells': []})
+        self.curr_area = QPolygonF()
         self.last_cells = None
         self.objects = OrderedDict()
         self.disappeared = OrderedDict()
@@ -249,9 +252,10 @@ class ObjectMappingThread(QThread):
         self.lastFrameId = 0
         self.currFrameId = 0
         self.Q = Queue()
-        self.tracker = CentroidTracker()
+        self.tracker = ObjectTracker()
         self.flow_list = []
         self.objectId = 0
+        self.focus_pt = QPointF(VideoInfo.FRAME_WIDTH / 2, VideoInfo.FRAME_HEIGHT / 2)
 
     def __del__(self):
         self.wait()
@@ -261,99 +265,7 @@ class ObjectMappingThread(QThread):
 
     def queueOutput(self, *args):
         self.Q.put(args)
-        logger.debug('{}-{} : queue success'.format(args[0] - 50, args[0]))
-
-    def register(self, object):
-        # when registering an object we use the next available object
-        # ID to store the centroid
-        self.objects[self.nextObjectID] = object
-        self.disappeared[self.nextObjectID] = 0
-        self.nextObjectID += 1
-
-    def deregister(self, objectID):
-        # to deregister an object ID we delete the object ID from
-        # both of our respective dictionaries
-        del self.objects[objectID]
-        del self.disappeared[objectID]
-
-    def updateObject(self, rects):
-        # check to see if the list of input bounding box rectangles
-        # is empty
-        new_object = 0
-        if len(rects) == 0:
-            # loop over any existing tracked objects and mark them
-            # as disappeared
-            for object_id in list(self.disappeared.keys()):
-                self.disappeared[object_id] += 1
-
-                # if we have reached a maximum number of consecutive
-                # frames where a given object has been marked as
-                # missing, deregister it
-                # if self.disappeared[object_id] > self.maxDisappeared:
-                #     self.deregister(object_id)
-
-            # return early as there are no centroids or tracking info
-            # to update
-            return 0
-
-        # if we are currently not tracking any objects take the input
-        # centroids and register each of them
-        if len(self.objects) == 0:
-            new_object += len(rects)
-            for i in range(0, len(rects)):
-                self.register(rects[i])
-
-        # otherwise, are are currently tracking objects so we need to
-        # try to match the input centroids to existing object
-        # centroids
-        else:
-            # initialize an array of input centroids for the current frame
-            input_centroids = np.array([(o.center().x(), o.center().y()) for o in rects])
-            # grab the set of object IDs and corresponding centroids
-            object_ids = list(self.objects.keys())
-            object_centroids = np.array([(o.center().x(), o.center().y()) for o in self.objects.values()])
-            d = cdist(object_centroids, input_centroids)
-            rows = d.min(axis=1).argsort()
-            cols = d.argmin(axis=1)[rows]
-            used_rows = set()
-            used_cols = set()
-            for (row, col) in zip(rows, cols):
-                if row in used_rows or col in used_cols:
-                    continue
-                object_id = object_ids[row]
-                if d[row, col] < 80:
-                    self.objects[object_id] = rects[col]
-                    self.disappeared[object_id] = 0
-                    used_rows.add(row)
-                    used_cols.add(col)
-            unused_rows = set(range(0, d.shape[0])).difference(used_rows)
-            unused_cols = set(range(0, d.shape[1])).difference(used_cols)
-            # if d.shape[0] >= d.shape[1]:
-            # for row in unused_rows:
-            #     object_id = object_ids[row]
-            #     self.disappeared[object_id] += 1
-            #     if self.disappeared[object_id] > self.maxDisappeared:
-            #         self.deregister(object_id)
-            # else:
-            new_object += len(unused_cols)
-            for col in unused_cols:
-                print(rects[col])
-                self.register(rects[col])
-
-        # return the set of trackable objects
-        return new_object
-
-    def translateObjects(self, start_id, end_id):
-        # centroid_idx = self.tracker.update(rects)
-        for i in range(start_id, end_id):
-            x, y = self.flow_list[i]
-            self.curr_area.translate(x, y)
-            translated = OrderedDict([(k, cell.translated(x, y)) for k, cell in self.objects.items()])
-            self.objectmap[i + 1] = {'area': QPolygonF(self.curr_area), 'cells': translated, 'scores': []}
-            self.objects.update(translated)
-            self.onUpdateProgress.emit(i + 1, 'objectMapping')
-        self.currFrameId = end_id
-        self.onUpdateObject.emit(self.objectmap)
+        # logger.debug('{}-{} : queue success'.format(args[0] - 50, args[0]))
 
     def run(self):
         while True:
@@ -361,25 +273,45 @@ class ObjectMappingThread(QThread):
             if not self.Q.empty():
                 (end_id, area_vec, detected_cells, scores) = self.Q.get()
                 area_vec = list(map(lambda p: QPointF(*p), area_vec))
-                self.curr_area = QPolygonF(area_vec)
-                detected_cells = [QRectF(*cell) for cell in detected_cells]
-                start_id = int(end_id + 1 - self.window_size)
+                start_id = int(end_id + 1 - self.window_size) if end_id + 1 > self.window_size else 0
                 if self.currFrameId < start_id:
                     # get last cells
-                    # last_cells = self.objectmap[self.currFrameId]['cells']
-                    self.translateObjects(self.currFrameId, start_id)
+                    for i in range(self.currFrameId, start_id):
+                        x, y = self.flow_list[i]
+                        self.curr_area.translate(x, y)
+                        cells = self.tracker.translated(x, y)
+                        self.objectmap[i + 1] = {'area': None, 'cells': cells}
+                        # self.objects.update(translated)
+                        self.onUpdateProgress.emit(i + 1, 'objectMapping')
+                    self.currFrameId = start_id
 
+                if not self.curr_area.containsPoint(self.focus_pt, Qt.OddEvenFill):
+                    self.last_area = self.curr_area
+                    self.curr_area = QPolygonF(area_vec)
+                else:
+                    self.curr_area = QPolygonF(area_vec)
+
+                self.curr_area = QPolygonF(area_vec)
+                detected_cells = [CellRect(*cell) for cell in detected_cells]
                 # last_cells = self.objectmap[self.currFrameId]["cells"]
-                new_count = self.updateObject(detected_cells)
+                new_count = self.tracker.update(detected_cells)
+                new_count = self.tracker.countInArea(self.curr_area.united(self.last_area))
+                cells = self.tracker.getObjects()
                 if new_count > 0:
-                    self.onNewDetectedCells.emit(self.currFrameId, self.objects.copy(), new_count)
+                    self.onNewDetectedCells.emit(self.currFrameId, cells, new_count)
                 # new and last conflict
-                self.objectmap[self.currFrameId] = {'area': QPolygonF(self.curr_area), 'cells': self.objects.copy(),
-                                                    'scores': scores}
-                self.translateObjects(self.currFrameId, end_id)
-
-                logger.debug("progress {}/{} : cell{} - scores{}".format(end_id, self.frame_count, str(detected_cells),
-                                                                         str(scores)))
+                self.objectmap[self.currFrameId] = {'area': self.curr_area.united(self.last_area), 'cells': cells}
+                for i in range(self.currFrameId, end_id):
+                    x, y = self.flow_list[i]
+                    # self.curr_area.translate(x, y)
+                    cells = self.tracker.translated(x, y)
+                    self.objectmap[i + 1] = {'area': self.curr_area.united(self.last_area), 'cells': cells}
+                    # self.objects.update(translated)
+                    self.onUpdateProgress.emit(i + 1, 'objectMapping')
+                self.currFrameId = end_id
+                self.onUpdateObject.emit(self.objectmap)
+                logger.debug('progress {}/{}, frames {}-{}'.format(end_id, self.frame_count, start_id,end_id))
+                logger.debug("  cell{} - scores{}".format(str(detected_cells), str(scores)))
                 if end_id == self.frame_count - 1:
                     self.sleep(1)
                     return
