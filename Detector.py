@@ -11,7 +11,7 @@ from skimage.measure import label, regionprops
 from skimage.morphology import binary_closing, dilation, square, erosion
 
 import VideoInfo
-from LineHandler import extractLines, calculateBoundingPoints
+from LineHandler import extractLines, calculateBoundingPoints, extend_verticals, extend_horizontals
 from keras_retinanet import models
 from keras_retinanet.utils.image import resize_image, preprocess_image
 import matplotlib.pyplot as plt
@@ -86,10 +86,18 @@ class CellDetector(QObject):
         # flow_list = np.array(self.flow_list[cur_frame_id - 50:cur_frame_id]).transpose()
         # move_distances = np.sum(np.sqrt(flow_list[0] ** 2 + flow_list[1] ** 2))
         # if move_distances > 5:
-        #     self.onDetectSuccess.emit(cur_frame_id, [], [])
+        #     self.onDetectSuccess.emit(cur_frame_id,[], [], [])
         #     return
-        verticals, horizontals = extractLines(buffer[0])
-        area_vec = calculateBoundingPoints(VideoInfo.FRAME_CENTER, verticals, horizontals)
+        verticals, horizontals = extractLines(buffer[0], threshold=0.66)
+        shape = buffer[0].shape
+        center = (int(shape[1] / 2), int(shape[0] / 2))
+        x_bound = [0, shape[1]]
+        y_bound = [0, shape[0]]
+        vs = extend_verticals(verticals, x_bound, y_bound)
+        hs = extend_horizontals(horizontals, x_bound, y_bound)
+        area_vec = calculateBoundingPoints(center, vs, hs)
+        # area_vec = self.find_count_area(buffer[0])
+
         frameDiff = np.abs(np.diff(buffer, axis=0))
         frameDiffSum = np.sum(frameDiff, axis=0)
         av = (frameDiffSum / len(frameDiff))
@@ -133,9 +141,9 @@ class CellDetector(QObject):
             cells = []
             for cell in cell_locs:
                 t, l, b, r = cell.bbox
-                if cell.area > 100:
+                if cell.area > 50:
                     cells.append([l, t, r - l, b - t])
-            if len(cells) > 5:
+            if len(cells) > 20:
                 self.onDetectSuccess.emit(cur_frame_id, area_vec, [], [])
                 return
             cells.extend(cells)

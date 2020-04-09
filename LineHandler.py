@@ -183,16 +183,16 @@ def extractLines(gray, threshold=0.7):
     _lines_y = []
     for line_i in _lines:
         orientation_i = math.atan2((line_i[0][1] - line_i[1][1]), (line_i[0][0] - line_i[1][0]))
-        if (abs(math.degrees(orientation_i)) > 45) and abs(math.degrees(orientation_i)) < (90 + 45):
+        if (abs(math.degrees(orientation_i)) > 80) and abs(math.degrees(orientation_i)) < (90 + 10):
             _lines_y.append(line_i)
-        else:
+        elif (abs(math.degrees(orientation_i)) < 10) or abs(math.degrees(orientation_i)) > (90 + 80):
             _lines_x.append(line_i)
 
     _lines_x = sorted(_lines_x, key=lambda _line: _line[0][0])
     _lines_y = sorted(_lines_y, key=lambda _line: _line[0][1])
 
-    verticals = merge_lines_pipeline_2(_lines_x)
-    horizontals = merge_lines_pipeline_2(_lines_y)
+    horizontals = merge_lines_pipeline_2(_lines_x)
+    verticals = merge_lines_pipeline_2(_lines_y)
 
     return verticals, horizontals
 
@@ -214,8 +214,8 @@ def intersection(line1, line2):
         raise Exception('lines do not intersect')
 
     d = (det(*line1), det(*line2))
-    x = int(det(d, xdiff) / div)
-    y = int(det(d, ydiff) / div)
+    x = det(d, xdiff) / div
+    y = det(d, ydiff) / div
     return (x, y)
 
 
@@ -230,12 +230,56 @@ def segmented_intersections(verticals, horizontals):
     return intersections
 
 
+def extend_verticals(verticals, x_bound, y_bound, add_bounding=True):
+    new_lines = []
+    for line in verticals:
+        p1, p2 = line
+        coef = np.polyfit([p1[1], p2[1]], [p1[0], p2[0]], 1)
+        polynomial = np.poly1d(coef)
+        x = polynomial(y_bound)
+        p3 = (int(x[0]), y_bound[0])
+        p4 = (int(x[1]), y_bound[1])
+        new_lines.append([p3, p4])
+    if add_bounding:
+        new_lines.append([(x_bound[0], y_bound[0]), (x_bound[0], y_bound[1])])
+        new_lines.append([(x_bound[1], y_bound[0]), (x_bound[1], y_bound[1])])
+    return new_lines
+
+
+def extend_horizontals(horizontals, x_bound, y_bound, add_bounding=True):
+    new_lines = []
+    for line in horizontals:
+        p1, p2 = line
+        coef = np.polyfit([p1[0], p2[0]], [p1[1], p2[1]], 1)
+        polynomial = np.poly1d(coef)
+        y = polynomial(x_bound)
+        p3 = (x_bound[0], int(y[0]))
+        p4 = (x_bound[1], int(y[1]))
+        new_lines.append([p3, p4])
+    if add_bounding:
+        new_lines.append([(x_bound[0], y_bound[0]), (x_bound[1], y_bound[0])])
+        new_lines.append([(x_bound[0], y_bound[1]), (x_bound[1], y_bound[1])])
+    return new_lines
+
+
 def calculateBoundingPoints(pt, verticals, horizontals):
     intersects = segmented_intersections(verticals, horizontals)
     intersects = sorted(intersects, key=lambda p: distance.euclidean(p, pt))
-    intersects = np.array(intersects)
+    intersects = np.array(intersects,dtype=np.int)
     topleft = intersects[np.logical_and(intersects[:, 0] < pt[0], intersects[:, 1] < pt[1])][0]
     topright = intersects[np.logical_and(intersects[:, 0] > pt[0], intersects[:, 1] < pt[1])][0]
     bottomleft = intersects[np.logical_and(intersects[:, 0] < pt[0], intersects[:, 1] > pt[1])][0]
     bottomright = intersects[np.logical_and(intersects[:, 0] > pt[0], intersects[:, 1] > pt[1])][0]
     return [topleft, topright, bottomright, bottomleft, topleft]
+
+
+def LineFeaturesToTrack(gray, threshold=0.66):
+    verticals, horizontals = extractLines(gray, threshold=threshold)
+    shape = gray.shape
+    center = (int(shape[1] / 2), int(shape[0] / 2))
+    x_bound = [0, shape[1]]
+    y_bound = [0, shape[0]]
+    vs = extend_verticals(verticals, x_bound, y_bound, add_bounding=False)
+    hs = extend_horizontals(horizontals, x_bound, y_bound, add_bounding=False)
+    intersects = segmented_intersections(vs, hs)
+    return np.array([[ic] for ic in intersects], dtype=np.float32)
