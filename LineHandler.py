@@ -271,3 +271,15 @@ def calculateBoundingPoints(pt, verticals, horizontals):
     bottomleft = intersects[np.logical_and(intersects[:, 0] < pt[0], intersects[:, 1] > pt[1])][0]
     bottomright = intersects[np.logical_and(intersects[:, 0] > pt[0], intersects[:, 1] > pt[1])][0]
     return [topleft, topright, bottomright, bottomleft, topleft]
+
+
+def LineFeaturesToTrack(gray, threshold=0.66):
+    verticals, horizontals = extractLines(gray, threshold=threshold)
+    shape = gray.shape
+    center = (int(shape[1] / 2), int(shape[0] / 2))
+    x_bound = [0, shape[1]]
+    y_bound = [0, shape[0]]
+    vs = extend_verticals(verticals, x_bound, y_bound, add_bounding=False)
+    hs = extend_horizontals(horizontals, x_bound, y_bound, add_bounding=False)
+    intersects = segmented_intersections(vs, hs)
+    return np.array([[ic] for ic in intersects], dtype=np.float32)

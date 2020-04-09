@@ -4,8 +4,9 @@ import os
 from queue import Queue
 
 import cv2
-from PyQt5.QtCore import QThread, QRect, QRectF, QPointF
+from PyQt5.QtCore import QThread, QRect, QRectF, QPointF, Qt, QPoint
 from PyQt5 import QtCore
+from PyQt5.QtGui import QPolygonF
 from PyQt5.QtWidgets import QApplication
 import numpy as np
 from scipy.spatial.distance import cdist
@@ -62,6 +63,7 @@ class VideoWriterThread(QThread):
         for i in range(0, flenght):
             ret, frame = self.cap.read()
             objects = self.frame_objects[i]["cells"]
+            area = self.frame_objects[i]["area"]
             total_count = len(self.log[-1]['cells'].values())
             for id, obj in objects.items():
                 cv2.rectangle(frame, (int(obj.left()), int(obj.top())),
@@ -69,6 +71,12 @@ class VideoWriterThread(QThread):
                               (255, 0, 0), 2)
                 cv2.putText(frame, 'id {}'.format(id), (int(obj.right()), int(obj.bottom())), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (0, 255, 0))
+            if area:
+                for j in range(area.size()-1):
+                    p1 = area.at(j).toPoint()
+                    p2 = area.at(j+1).toPoint()
+                    cv2.line(frame, (p1.x(), p1.y()), (p2.x(), p2.y()), (0, 0, 255), 2)
+
             cv2.putText(frame, 'total count : ' + str(total_count), (10, 30),
                         fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1,
                         color=(255, 255, 255))
@@ -83,7 +91,7 @@ class VideoWriterThread(QThread):
             for id, obj in cells.items():
                 cv2.rectangle(image, (int(obj.left()), int(obj.top())),
                               (int(obj.right()), int(obj.bottom())),
-                              (0,255, 0), 2)
+                              (0, 255, 0), 2)
                 cv2.putText(image, 'id {}'.format(id), (int(obj.right()), int(obj.bottom())), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (0, 255, 0))
                 cv2.putText(image, 'total count : ' + str(total_count), (10, 30),
@@ -253,7 +261,7 @@ class ObjectMappingThread(QThread):
 
     def queueOutput(self, *args):
         self.Q.put(args)
-        logger.debug('{}-{} : queue success'.format(args[0], args[0] - 50))
+        logger.debug('{}-{} : queue success'.format(args[0] - 50, args[0]))
 
     def register(self, object):
         # when registering an object we use the next available object
@@ -339,10 +347,9 @@ class ObjectMappingThread(QThread):
         # centroid_idx = self.tracker.update(rects)
         for i in range(start_id, end_id):
             x, y = self.flow_list[i]
-            counting_area = self.counting_area.translated(x,y)
+            self.curr_area.translate(x, y)
             translated = OrderedDict([(k, cell.translated(x, y)) for k, cell in self.objects.items()])
-            self.objectmap[i + 1] = {'area': counting_area, 'cells': translated, 'scores': []}
-            self.counting_area = counting_area
+            self.objectmap[i + 1] = {'area': QPolygonF(self.curr_area), 'cells': translated, 'scores': []}
             self.objects.update(translated)
             self.onUpdateProgress.emit(i + 1, 'objectMapping')
         self.currFrameId = end_id
@@ -352,8 +359,9 @@ class ObjectMappingThread(QThread):
         while True:
             # otherwise, ensure the queue has room in it
             if not self.Q.empty():
-                (end_id, counting_area, detected_cells, scores) = self.Q.get()
-                self.counting_area = QRectF(*counting_area)
+                (end_id, area_vec, detected_cells, scores) = self.Q.get()
+                area_vec = list(map(lambda p: QPointF(*p), area_vec))
+                self.curr_area = QPolygonF(area_vec)
                 detected_cells = [QRectF(*cell) for cell in detected_cells]
                 start_id = int(end_id + 1 - self.window_size)
                 if self.currFrameId < start_id:
@@ -364,9 +372,10 @@ class ObjectMappingThread(QThread):
                 # last_cells = self.objectmap[self.currFrameId]["cells"]
                 new_count = self.updateObject(detected_cells)
                 if new_count > 0:
-                    self.onNewDetectedCells.emit(self.currFrameId, self.objects, new_count)
+                    self.onNewDetectedCells.emit(self.currFrameId, self.objects.copy(), new_count)
                 # new and last conflict
-                self.objectmap[self.currFrameId] = {'area': QRectF(*counting_area), 'cells': self.objects.copy(), 'scores': scores}
+                self.objectmap[self.currFrameId] = {'area': QPolygonF(self.curr_area), 'cells': self.objects.copy(),
+                                                    'scores': scores}
                 self.translateObjects(self.currFrameId, end_id)
 
                 logger.debug("progress {}/{} : cell{} - scores{}".format(end_id, self.frame_count, str(detected_cells),
