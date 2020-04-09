@@ -1,0 +1,12 @@
+import cv2
+
+global FRAME_COUNT, FPS, FRAME_WIDTH, FRAME_HEIGHT,FRAME_CENTER
+
+
+def init(cap):
+    global FRAME_COUNT, FPS, FRAME_WIDTH, FRAME_HEIGHT, FRAME_CENTER
+    FRAME_COUNT = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    FPS = int(cap.get(cv2.CAP_PROP_FPS))
+    FRAME_WIDTH = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    FRAME_HEIGHT = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    FRAME_CENTER = (int(FRAME_WIDTH/2), int(FRAME_HEIGHT/2))
