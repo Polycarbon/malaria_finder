@@ -45,7 +45,7 @@ class MainWindow(QMainWindow):
         self.ui.saveButton.setEnabled(False)
         self.ui.timeSlider.sliderMoved.connect(self.setPosition)
         self.ui.modeCheckBox.stateChanged.connect(self.switchMode)
-        self.ui.statusbar:QStatusBar
+        self.ui.statusbar: QStatusBar
         self.ui.statusbar.showMessage("Init Model ...")
         # self.ui.statusbar.setLayout()
         self.mediaPlayer.setVideoOutput(self.videoWidget.videoSurface())
@@ -68,9 +68,10 @@ class MainWindow(QMainWindow):
     def closeEvent(self, *args, **kwargs):
         QApplication.closeAllWindows()
 
-    def switchMode(self,state):
+    def switchMode(self, state):
         self.detector.setMode(state)
-        self.startProcess()
+        if self.input_name:
+            self.startProcess()
 
     def startProcess(self):
         if self.input_name:
@@ -80,12 +81,10 @@ class MainWindow(QMainWindow):
             self.mediaPlayer.setMedia(QMediaContent(QUrl.fromLocalFile(self.input_name)))
             self.cap = cv2.VideoCapture(self.input_name)
             self.frameCount = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            fps = np.ceil(self.cap.get(cv2.CAP_PROP_FPS))
-            window_time = 2  # sec
             VideoInfo.init(self.cap)
             dialog = ProcessDialog(self)
             dialog.setMaximum(self.frameCount)
-            map_worker = ObjectMapper(self.frameCount, fps)
+            map_worker = ObjectMapper()
             map_worker.onUpdateObject.connect(self.updateObject)
             map_worker.onUpdateProgress.connect(dialog.updateProgress)
             ppc_worker = PreprocessThread(self.input_name)

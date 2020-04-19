@@ -6,6 +6,7 @@ from PyQt5.QtCore import QObject, QThread
 import numpy as np
 from scipy.spatial import distance
 from skimage import feature, exposure
+from skimage.feature import blob_dog, blob_doh
 from skimage.filters import threshold_yen
 from skimage.measure import label, regionprops
 from skimage.morphology import binary_closing, dilation, square, erosion
@@ -20,6 +21,7 @@ logger = logging.getLogger('data flow')
 
 PROPER_REGION = 0
 RESNET = 1
+BLOB = 2
 
 
 class CellDetector(QObject):
@@ -32,7 +34,7 @@ class CellDetector(QObject):
         self.thread = QThread()
         self.thread.start()
         self.moveToThread(self.thread)
-        self.mode = RESNET
+        self.mode = PROPER_REGION
         self.flow_list = []
 
     def initModel(self, path='src/resnet50.h5', backbone='resnet50'):
@@ -40,8 +42,8 @@ class CellDetector(QObject):
             logger.info('Initialize Model')
             if self.model is None:
                 self.model = models.load_model(path, backbone_name=backbone)
-            self.onInitModelSuccess.emit()
-            logger.info('Init Model Success')
+                self.onInitModelSuccess.emit()
+                logger.info('Init Model Success')
         else:
             logger.info('no need to initialize Model')
             self.onInitModelSuccess.emit()
@@ -148,6 +150,22 @@ class CellDetector(QObject):
                 return
             cells.extend(cells)
             cells, weights = cv2.groupRectangles(cells, 1, 1.0)
-            # cell_locs = [p.bbox for p in cell_locs if p.area > 100]
+            sc = [1.0] * len(cells)
+            self.onDetectSuccess.emit(cur_frame_id, area_vec, list(cells), sc)
+
+        if self.mode == BLOB:
+            image = normframe
+            blobs = blob_doh(image, min_sigma=20, threshold=.1)
+            cells = []
+            for blob in blobs:
+                y, x, r = blob
+                if r > 10:
+                    cells.append([x - r, y - r, r, r])
+            cells.extend(cells)
+            cells, weights = cv2.groupRectangles(cells, 1, 1.0)
+            if len(cells) > 5:
+                # print("num{} move{}".format(len(cells),move_distances))
+                self.onDetectSuccess.emit(cur_frame_id, area_vec, [], [])
+                return
             sc = [1.0] * len(cells)
             self.onDetectSuccess.emit(cur_frame_id, area_vec, list(cells), sc)

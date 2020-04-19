@@ -95,7 +95,7 @@ class VideoWriterThread(QThread):
                               (int(obj.right()), int(obj.bottom())),
                               (0, 255, 0), 2)
                 cv2.putText(image, 'id {}'.format(id), (int(obj.right()), int(obj.bottom())), cv2.FONT_HERSHEY_SIMPLEX,
-                            1, (0, 255, 0))
+                            2, (0, 255, 0))
                 cv2.putText(image, 'total count : ' + str(total_count), (10, 30),
                             fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1,
                             color=(255, 255, 255))
@@ -128,14 +128,12 @@ class PreprocessThread(QThread):
     def run(self):
         QApplication.processEvents()
         logger.info('start preprocess video')
-        frame_count = int(self.fvs.stream.get(cv2.CAP_PROP_FRAME_COUNT))
-        fps = np.ceil(self.fvs.stream.get(cv2.CAP_PROP_FPS))
-        window_size = int(fps * window_time)
-        step_size = int(fps)
+        frame_count = VideoInfo.FRAME_COUNT
+        window_size = VideoInfo.WINDOW_SIZE
+        step_size = VideoInfo.STEP_SIZE
         move_thres = 0.5
         buffer = []
         prev = self.fvs.read()
-        targetSize = (640, 360)
         # prev = cv2.resize(prev, targetSize)
         prev_gray = cv2.cvtColor(prev, cv2.COLOR_BGR2GRAY)
         # prev_gray = cv2.GaussianBlur(prev_gray, (5, 5), 0)
@@ -237,12 +235,11 @@ class ObjectMapper(QThread):
     onUpdateObject = QtCore.pyqtSignal(defaultdict)
     onNewDetectedCells = QtCore.pyqtSignal(int, OrderedDict, int)
 
-    def __init__(self, frame_count, fps):
+    def __init__(self):
         QThread.__init__(self)
         self.stopped_id = None
-        self.frame_count = frame_count
-        self.fps = fps
-        self.window_size = fps * window_time
+        self.frame_count = VideoInfo.FRAME_COUNT
+        self.window_size = VideoInfo.WINDOW_SIZE
         self.objectmap = defaultdict(lambda: {'area': None, 'cells': []})
         self.curr_area = QPolygonF()
         self.last_cells = None
@@ -310,7 +307,7 @@ class ObjectMapper(QThread):
                     self.onUpdateProgress.emit(i + 1, 'objectMapping')
                 self.currFrameId = end_id
                 self.onUpdateObject.emit(self.objectmap)
-                logger.debug('progress {}/{}, frames {}-{}'.format(end_id, self.frame_count, start_id,end_id))
+                logger.debug('frames {}-{} ,progress {}/{}'.format(start_id,end_id,end_id, self.frame_count))
                 logger.debug("  cell{} - scores{}".format(str(detected_cells), str(scores)))
                 if end_id == self.frame_count - 1:
                     self.sleep(1)
