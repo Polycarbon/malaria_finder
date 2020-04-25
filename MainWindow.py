@@ -107,21 +107,17 @@ class MainWindow(QMainWindow):
             self.ui.saveButton.setEnabled(True)
 
     def openFile(self):
-        file_name = QFileDialog.getOpenFileName(self, "Open Video")[0]
+        file_name = QFileDialog.getOpenFileName(self, "Choose Save Directory")[0]
         if os.path.exists(file_name):
             self.input_name = file_name
             self.startProcess()
 
     def saveFile(self):
-        dialog = SaveDialog()
-        dialog.exec_()
         head, tail = os.path.split(self.input_name)
         file_prefix = tail.split('.')[0]
-        worker = VideoWriterThread(self.cap, self.frame_objects, self.log, file_prefix,
-                                   dialog.getSaveDirectory(),
-                                   dialog.isSaveImage,
-                                   dialog.isSaveVideo)
-        worker.start()
+        dialog = SaveDialog(self.cap, self.frame_objects, self.log, file_prefix)
+        dialog.exec_()
+
 
     def updateObject(self, frame_objects):
         self.frame_objects = frame_objects

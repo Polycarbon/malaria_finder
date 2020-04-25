@@ -1,6 +1,6 @@
 
 from PyQt5.QtCore import QRect, QPoint, Qt, QRectF, QPointF
-from PyQt5.QtGui import QImage, QPalette, QPainter, QRegion, QPolygonF
+from PyQt5.QtGui import QImage, QPalette, QPainter, QRegion, QPolygonF, QFont
 from PyQt5.QtMultimedia import QAbstractVideoSurface, QAbstractVideoBuffer, QVideoFrame, QVideoSurfaceFormat
 from PyQt5.QtWidgets import QWidget, QSizePolicy
 
@@ -119,9 +119,14 @@ class VideoWidgetSurface(QAbstractVideoSurface):
                 painter.setPen(Qt.red)
                 if cell.isCounted():
                     painter.setPen(Qt.green)
-                    painter.drawText(cell_box.bottomRight(), "id {}".format(cell.getCountId()))
                 painter.drawPoint(cell_box.center())
                 painter.drawRect(cell_box)
+                if cell.isCounted():
+                    painter.setPen(Qt.green)
+                    font = QFont()
+                    font.setPixelSize(16)
+                    painter.setFont(font)
+                    painter.drawText(cell_box.bottomRight().x()+5 ,cell_box.bottomRight().y(), "id {}".format(cell.getCountId()))
             area = self.output[frame_id]['area']
             if area:
                 area = self.transformed(area)

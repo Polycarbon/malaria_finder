@@ -66,7 +66,7 @@ class VideoWriterThread(QThread):
             ret, frame = self.cap.read()
             objects = self.frame_objects[i]["cells"]
             area = self.frame_objects[i]["area"]
-            total_count = len(self.log[-1]['cells'].values())
+            total_count = len(self.log[-1]['cells'].values()) if len(self.log) !=0 else 0
             for id, obj in objects.items():
                 cv2.rectangle(frame, (int(obj.left()), int(obj.top())),
                               (int(obj.right()), int(obj.bottom())),
@@ -85,6 +85,7 @@ class VideoWriterThread(QThread):
 
             # self.onUpdateProgress.emit(i)
             out.write(frame)
+            self.onUpdateProgress.emit(i)
 
         for log in self.log:
             image = log['image']
@@ -96,12 +97,13 @@ class VideoWriterThread(QThread):
                               (0, 255, 0), 2)
                 cv2.putText(image, 'id {}'.format(id), (int(obj.right()), int(obj.bottom())), cv2.FONT_HERSHEY_SIMPLEX,
                             2, (0, 255, 0))
-                cv2.putText(image, 'total count : ' + str(total_count), (10, 30),
+                cv2.putText(image, 'Total Count : ' + str(total_count), (10, 30),
                             fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=1,
                             color=(255, 255, 255))
             file_name = os.path.join(self.out_dir, self.file_prefix + "_" + detect_time + ".png")
             cv2.imwrite(file_name, image)
         out.release()
+        self.onUpdateProgress.emit(flenght)
         logger.info("save finish")
 
 
