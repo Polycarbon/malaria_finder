@@ -5,14 +5,14 @@ import cv2
 import imutils
 import numpy as np
 from PyQt5.QtCore import QUrl
-from PyQt5.QtGui import QImage, QKeySequence
+from PyQt5.QtGui import QImage, QKeySequence, QIcon
 from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
 from PyQt5.QtWidgets import QMainWindow, QVBoxLayout, QStyle, QFileDialog, QListWidgetItem, QApplication, QStatusBar, \
-    QShortcut
+    QShortcut, QComboBox
 from PyQt5.uic import loadUi
 
 import VideoInfo
-from Detector import CellDetector
+from Detector import CellDetector, MODES
 from ListWidget import QCustomQWidget
 from ProcessDialog import ProcessDialog
 from SaveDialog import SaveDialog
@@ -27,6 +27,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         QMainWindow.__init__(self)
         self.ui = loadUi('forms/mainwindow.ui', self)
+        self.setWindowTitle('Malaria Finder')
         # self.ui = Ui_MainWindow()
         # self.ui.setupUi(self)
         self.input_name = None
@@ -44,7 +45,10 @@ class MainWindow(QMainWindow):
         self.ui.saveButton.clicked.connect(self.saveFile)
         self.ui.saveButton.setEnabled(False)
         self.ui.timeSlider.sliderMoved.connect(self.setPosition)
-        self.ui.modeCheckBox.stateChanged.connect(self.switchMode)
+        self.ui.modeCbBox: QComboBox
+        self.ui.modeCbBox.addItems(MODES)
+        self.ui.modeCbBox.setCurrentIndex(0)
+        self.ui.modeCbBox.currentTextChanged.connect(self.detector.setMode)
         self.ui.statusbar: QStatusBar
         self.ui.statusbar.showMessage("Init Model ...")
         # self.ui.statusbar.setLayout()
@@ -62,20 +66,19 @@ class MainWindow(QMainWindow):
         # self.setFixedSize(s_max)
 
     def showEvent(self, *args, **kwargs):
-        self.detector.onInitModelSuccess.connect(lambda: self.ui.statusbar.showMessage("Ready"))
+        self.detector.onInitModelSuccess.connect(lambda: self.ui.statusbar.showMessage("Please select your video"))
         self.detector.initModel()
 
     def closeEvent(self, *args, **kwargs):
         QApplication.closeAllWindows()
 
-    def switchMode(self, state):
-        self.detector.setMode(state)
-        if self.input_name:
-            self.startProcess()
+    def switchMode(self, mode):
+        self.detector.setMode(mode)
 
     def startProcess(self):
         if self.input_name:
             self.ui.listWidget.clear()
+            self.ui.totalNumber.display(0)
             self.sum_cells = 0
             self.log = []
             self.mediaPlayer.setMedia(QMediaContent(QUrl.fromLocalFile(self.input_name)))
@@ -89,13 +92,18 @@ class MainWindow(QMainWindow):
             map_worker.onUpdateProgress.connect(dialog.updateProgress)
             ppc_worker = PreprocessThread(self.input_name)
             ppc_worker.onFrameChanged.connect(map_worker.updateOpticalFlow)
-            ppc_worker.onFrameChanged.connect(self.detector.updateOpticalFlow)
             ppc_worker.onBufferReady.connect(self.detector.detect)
             ppc_worker.onUpdateProgress.connect(dialog.updateProgress)
             map_worker.onNewDetectedCells.connect(self.updateDetectLog)
             map_worker.finished.connect(dialog.close)
-            dialog.closed.connect(ppc_worker.quit)
-            dialog.closed.connect(map_worker.quit)
+            def onClosed():
+                if map_worker.isRunning():
+                    self.ui.statusbar.showMessage("Please select your video")
+                else:
+                    self.ui.statusbar.showMessage("Ready : "+self.input_name)
+                ppc_worker.quit()
+                map_worker.quit()
+            dialog.closed.connect(onClosed)
             self.detector.onDetectSuccess.connect(map_worker.queueOutput)
             # ppc_worker.finished.connect(dialog.close)
             # dialog.onReady2Read.connect(self.setOutput)
@@ -103,13 +111,16 @@ class MainWindow(QMainWindow):
             map_worker.start()
             ppc_worker.start()
             dialog.exec_()
-            self.ui.playButton.setEnabled(True)
+            self.ui.modeCbBox.setEnabled(True)
             self.ui.saveButton.setEnabled(True)
 
     def openFile(self):
         file_name = QFileDialog.getOpenFileName(self, "Choose Save Directory")[0]
         if os.path.exists(file_name):
             self.input_name = file_name
+            self.ui.playButton.setEnabled(True)
+            self.ui.statusbar.showMessage("Findind ... : "+self.input_name)
+            self.ui.modeCbBox.setEnabled(False)
             self.startProcess()
 
     def saveFile(self):
@@ -118,13 +129,11 @@ class MainWindow(QMainWindow):
         dialog = SaveDialog(self.cap, self.frame_objects, self.log, file_prefix)
         dialog.exec_()
 
-
     def updateObject(self, frame_objects):
         self.frame_objects = frame_objects
         duration = self.mediaPlayer.duration()
         self.videoWidget.setOutput(frame_objects, duration / self.frameCount)
         self.ui.playButton.setEnabled(True)
-        self.ui.saveButton.setEnabled(True)
 
     def updateDetectLog(self, detected_frame_id, cell_map, cell_count):
         # append log

@@ -41,7 +41,7 @@ class SaveDialog(QDialog):
         worker.finished.connect(lambda :self.close())
         worker.start()
 
-    def updateProgress(self,value):
+    def updateProgress(self, value):
         self.progressBar.setValue(value)
 
     def closeEvent(self, event):

@@ -2,6 +2,8 @@
 import logging
 import sys
 import os
+
+from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication
 from MainWindow import MainWindow
 
@@ -79,6 +81,8 @@ logger = logging.getLogger('data flow')
 logger.setLevel(logging.DEBUG)
 if __name__ == "__main__":
     app = QApplication([])
+    app.setApplicationName("Malaria Finder")
+    app.setWindowIcon(QIcon('src/ic_logo.png'))
     window = MainWindow()
     # window.setStyleSheet(styleData)
     window.setFixedSize(window.size())

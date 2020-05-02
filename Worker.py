@@ -133,7 +133,7 @@ class PreprocessThread(QThread):
         frame_count = VideoInfo.FRAME_COUNT
         window_size = VideoInfo.WINDOW_SIZE
         step_size = VideoInfo.STEP_SIZE
-        move_thres = 0.5
+        move_thres = 0.20
         buffer = []
         prev = self.fvs.read()
         # prev = cv2.resize(prev, targetSize)
@@ -183,7 +183,8 @@ class PreprocessThread(QThread):
                 else:
                     tmp.extend(buffer)
                     if len(tmp) >= window_size:
-                        self.onBufferReady.emit(frameId - 1, tmp[-window_size:])
+                        pass
+                        # self.onBufferReady.emit(frameId - 1, tmp[-window_size:])
                     # clear buffer
                     tmp = []
                     buffer = []

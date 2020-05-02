@@ -4,6 +4,7 @@ from collections import defaultdict
 
 import cv2
 from PyQt5 import QtCore, QtWidgets
+from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QDialog, QMessageBox
 from PyQt5.uic import loadUi
 
@@ -20,23 +21,18 @@ class ProcessDialog(QDialog):
     closed = QtCore.pyqtSignal()
 
     def __init__(self, parent=None):
-        super(ProcessDialog, self).__init__()
+        super(ProcessDialog, self).__init__(None, QtCore.Qt.WindowSystemMenuHint | QtCore.Qt.WindowTitleHint)
         self.ui = loadUi('forms/processdialog.ui', self)
         self.ui.buttonBox.rejected.connect(self.close)
-        self.setWindowTitle('Processing')
+        self.setWindowTitle('Finding')
+        self.setWindowIcon(QIcon('src/ic_logo.png'))
         self.setFixedSize(self.size())
-        # self.setWindowFlags(QtCore.Qt.WindowStaysOnTopHint)
+        self.progress1 = 0
+        self.progress2 = 0
 
     def closeEvent(self, event):
         self.closed.emit()
         event.accept()
-    #     if self.worker.isRunning():
-    #         reply = QMessageBox.question(self, 'Window Close', 'Are you sure you want to close the window?',
-    #                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-    #         if reply == QMessageBox.Yes:
-    #             event.accept()
-    #         else:
-    #             event.ignore()
 
     def readOutput(self, map, log):
         # print(out)
@@ -45,10 +41,12 @@ class ProcessDialog(QDialog):
 
     def updateProgress(self, value, processname):
         if processname == 'preprocess':
-            self.ui.progressBar1.setValue(value)
+            self.progress1 = value
         if processname == 'objectMapping':
-            self.ui.progressBar2.setValue(value)
+            self.progress2 = value
+        progress = (self.progress1+self.progress2)/2
+        self.ui.progressBar.setValue(progress)
 
     def setMaximum(self, value):
-        self.ui.progressBar1.setMaximum(value)
-        self.ui.progressBar2.setMaximum(value)
+        self.ui.progressBar.setMaximum(value)
+        self.ui.progressBar.setMaximum(value)

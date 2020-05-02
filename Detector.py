@@ -19,8 +19,9 @@ import matplotlib.pyplot as plt
 
 logger = logging.getLogger('data flow')
 
-PROPER_REGION = 0
-RESNET = 1
+IMAGE_PROCESSING = "Image Processing"
+DEEP_LEARNING = "Deep Learning"
+MODES = [DEEP_LEARNING, IMAGE_PROCESSING]
 BLOB = 2
 
 
@@ -34,11 +35,10 @@ class CellDetector(QObject):
         self.thread = QThread()
         self.thread.start()
         self.moveToThread(self.thread)
-        self.mode = PROPER_REGION
-        self.flow_list = []
+        self.mode = DEEP_LEARNING
 
     def initModel(self, path='src/resnet50.h5', backbone='resnet50'):
-        if self.mode == RESNET:
+        if self.mode == DEEP_LEARNING:
             logger.info('Initialize Model')
             if self.model is None:
                 self.model = models.load_model(path, backbone_name=backbone)
@@ -50,15 +50,13 @@ class CellDetector(QObject):
 
     def setMode(self, mode):
         if mode == 1:
-            self.mode = RESNET
+            self.mode = DEEP_LEARNING
         else:
-            self.mode = PROPER_REGION
+            self.mode = IMAGE_PROCESSING
 
     def setObjectMap(self, objectmap):
         self.objectmap = objectmap
 
-    def updateOpticalFlow(self, d):
-        self.flow_list.append(d)
 
     @staticmethod
     def find_count_area(gray):
@@ -105,7 +103,7 @@ class CellDetector(QObject):
         av[av > v_max] = v_max
         av[av < v_min] = v_min
         normframe = (((av - v_min) / (v_max - v_min)) * 255).astype('uint8')
-        if self.mode == RESNET:
+        if self.mode == DEEP_LEARNING:
             # preprocess
             image = np.stack((normframe,) * 3, axis=-1)
             image = preprocess_image(image)
@@ -128,7 +126,7 @@ class CellDetector(QObject):
                 return
             self.onDetectSuccess.emit(cur_frame_id, area_vec, cells.tolist(), sc)
 
-        if self.mode == PROPER_REGION:
+        if self.mode == IMAGE_PROCESSING:
             image = normframe
             thresh = threshold_yen(image)
             binary = image >= thresh
@@ -142,7 +140,8 @@ class CellDetector(QObject):
             cells = []
             for cell in cell_locs:
                 t, l, b, r = cell.bbox
-                if 100 < cell.area:
+                prop = (b-t)/(r-l)
+                if 100 < cell.area and 0.2 < prop < 6.0:
                     cells.append([l, t, r - l, b - t])
             if len(cells) > 5:
                 # print("num{} move{}".format(len(cells),move_distances))
