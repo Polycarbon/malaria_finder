@@ -6,7 +6,6 @@ from PyQt5.QtGui import QFont, QPixmap
 from PyQt5.QtWidgets import QListWidgetItem, QWidget, QHBoxLayout, QLabel, QVBoxLayout, QLCDNumber
 from PyQt5.uic import loadUi
 
-from forms.Ui_WidgetItem import Ui_Form
 
 
 class QCustomQWidget(QWidget):

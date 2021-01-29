@@ -7,8 +7,6 @@ from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtWidgets import QDialog, QMessageBox
 from PyQt5.uic import loadUi
 
-from Worker import PreprocessThread
-from forms import Ui_processdialog
 
 
 class ProcessName(enum.Enum):
