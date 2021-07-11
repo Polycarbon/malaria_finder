@@ -1,15 +1,10 @@
 # This Python file uses the following encoding: utf-8
 import enum
-from collections import defaultdict
 
-import cv2
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import QtCore
 from PyQt5.QtGui import QIcon
-from PyQt5.QtWidgets import QDialog, QMessageBox
+from PyQt5.QtWidgets import QDialog
 from PyQt5.uic import loadUi
-
-from Worker import PreprocessThread
-from forms import Ui_processdialog
 
 
 class ProcessName(enum.Enum):

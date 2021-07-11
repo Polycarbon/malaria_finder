@@ -1,12 +1,7 @@
-import datetime
-
-from PyQt5 import QtWidgets, QtCore, QtGui
-from PyQt5.QtCore import QRect
+from PyQt5 import QtWidgets, QtCore
 from PyQt5.QtGui import QFont, QPixmap
-from PyQt5.QtWidgets import QListWidgetItem, QWidget, QHBoxLayout, QLabel, QVBoxLayout, QLCDNumber
+from PyQt5.QtWidgets import QWidget, QHBoxLayout
 from PyQt5.uic import loadUi
-
-from forms.Ui_WidgetItem import Ui_Form
 
 
 class QCustomQWidget(QWidget):

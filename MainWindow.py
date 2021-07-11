@@ -67,7 +67,7 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, *args, **kwargs):
         self.detector.onInitModelSuccess.connect(lambda: self.ui.statusbar.showMessage("Please select your video"))
-        self.detector.initModel()
+        self.detector.initModel("model/resnet50v2conf_67.h5")
 
     def closeEvent(self, *args, **kwargs):
         QApplication.closeAllWindows()

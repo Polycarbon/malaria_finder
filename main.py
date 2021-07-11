@@ -7,7 +7,7 @@ from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication
 from MainWindow import MainWindow
 
-os.chdir("C:/Users/Polycarbon/Desktop/Project/malaria detection device/malaria_finder")
+# os.chdir("C:/Users/Polycarbon/Desktop/Project/malaria detection device/malaria_finder")
 styleData="""
 QWidget
 {
